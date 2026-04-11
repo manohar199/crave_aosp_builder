@@ -66,7 +66,7 @@ on:
         - 'user' 
       CLEAN_BUILD:
         description: 'Build with a clean workspace?'
-        required: true
+        required: false
         default: 'no'
         type: choice
         options: 
