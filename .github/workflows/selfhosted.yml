@@ -30,34 +30,34 @@ on:
           - 'AOSP'
       BUILD_DIFFERENT_ROM:
         description: "Command to initialize a different 'repo' project:"
-        required: false
-        default: "echo 'Build Starting!'"
+        required: true
+        default: 'repo init -u https://github.com/LineageOS/android.git -b lineage-23.2 --git-lfs'
       REMOVALS:
         description: "Folders to be removed before syncing:"
         required: false
       LOCAL_MANIFEST:
         description: "Personal local manifest [repository or raw]:"
         required: true
-        default: 'https://github.com/sounddrill31/local_manifests_oxygen'
+        default: 'https://github.com/manohar199/bramble_matrixx_manifest'
       LOCAL_MANIFEST_BRANCH:
         description: "Personal local manifest's branch:"
         required: false
-        default: 'lineage-21-qpr3'
+        default: 'main'
       DEVICE_NAME:
         description: "Device's codename:"
-        required: true
+        required: false
         default: "oxygen"
       PRODUCT_NAME:
         description: "Product to build:"
-        required: true
+        required: false
         default: "oxygen"
       BUILD_COMMAND:
         description: 'Command to be used for compiling:'
         required: true
-        default: 'mka bacon'
+        default: 'lunch lineage_bramble-bp4a-user && mka bacon'
       BUILD_TYPE:
         description: 'Type of build:'
-        required: true
+        required: false
         default: 'userdebug'
         type: choice
         options: 
