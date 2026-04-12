@@ -30,48 +30,48 @@ on:
           - 'AOSP'
       BUILD_DIFFERENT_ROM:
         description: "Command to initialize a different 'repo' project:"
-        required: true
-        default: 'repo init -u https://github.com/LineageOS/android.git -b lineage-23.2 --git-lfs'
+        required: false
+        default: "echo 'Build Starting!'"
       REMOVALS:
         description: "Folders to be removed before syncing:"
         required: false
       LOCAL_MANIFEST:
         description: "Personal local manifest [repository or raw]:"
         required: true
-        default: 'https://github.com/manohar199/bramble_matrixx_manifest'
+        default: 'https://github.com/sounddrill31/local_manifests_oxygen'
       LOCAL_MANIFEST_BRANCH:
         description: "Personal local manifest's branch:"
         required: false
-        default: 'main'
+        default: 'lineage-21-qpr3'
       DEVICE_NAME:
         description: "Device's codename:"
-        required: false
+        required: true
         default: "oxygen"
       PRODUCT_NAME:
         description: "Product to build:"
-        required: false
+        required: true
         default: "oxygen"
       BUILD_COMMAND:
         description: 'Command to be used for compiling:'
         required: true
-        default: 'lunch lineage_bramble-bp4a-user && mka bacon'
-      #BUILD_TYPE:
-       # description: 'Type of build:'
-        #required: false
-        #default: 'userdebug'
-        #type: choice
-        #options: 
-       # - 'eng'
-        #- 'userdebug'
-       #- 'user' 
-      #CLEAN_BUILD:
-        #description: 'Build with a clean workspace?'
-        #required: false
-        #default: 'no'
-        #type: choice
-        #options: 
-        #- 'yes'
-       # - 'no'
+        default: 'mka bacon'
+      BUILD_TYPE:
+        description: 'Type of build:'
+        required: true
+        default: 'userdebug'
+        type: choice
+        options: 
+        - 'eng'
+        - 'userdebug'
+        - 'user' 
+      CLEAN_BUILD:
+        description: 'Build with a clean workspace?'
+        required: true
+        default: 'no'
+        type: choice
+        options: 
+        - 'yes'
+        - 'no'
 
 jobs:
   Start-Runner:
@@ -209,7 +209,7 @@ jobs:
         elif [[ "${{ github.event.inputs.BASE_PROJECT }}" == "RisingOS 15 Revived" ]] && [[ "${{ github.event.inputs.BUILD_DIFFERENT_ROM }}" == "echo 'Build Starting!'" ]]; then
             LUNCH="riseup ${{ github.event.inputs.PRODUCT_NAME }} ${{ github.event.inputs.BUILD_TYPE }}"
         else
-            #LUNCH="breakfast ${{ github.event.inputs.PRODUCT_NAME }} ${{ github.event.inputs.BUILD_TYPE }}"
+            LUNCH="breakfast ${{ github.event.inputs.PRODUCT_NAME }} ${{ github.event.inputs.BUILD_TYPE }}"
         fi
 
           if [[ "${{ github.event.inputs.LOCAL_MANIFEST }}" =~ \.xml(/)?$ ]]; then
@@ -538,7 +538,7 @@ jobs:
 
         # Build the ROM
         $LUNCH && \
-        #make installclean && \
+        make installclean && \
         ${{ github.event.inputs.BUILD_COMMAND }}"
       timeout-minutes: 1440
 
