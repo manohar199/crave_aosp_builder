@@ -538,7 +538,7 @@ jobs:
 
         # Build the ROM
         $LUNCH && \
-        #make installclean && \
+      
         ${{ github.event.inputs.BUILD_COMMAND }}"
       timeout-minutes: 1440
 
