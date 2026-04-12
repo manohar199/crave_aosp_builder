@@ -57,7 +57,7 @@ on:
         default: 'lunch lineage_bramble-bp4a-user && mka bacon'
       BUILD_TYPE:
         description: 'Type of build:'
-        required: true
+        required: false
         default: 'userdebug'
         type: choice
         options: 
