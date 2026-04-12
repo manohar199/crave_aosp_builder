@@ -45,19 +45,19 @@ on:
         default: 'lineage-21-qpr3'
       DEVICE_NAME:
         description: "Device's codename:"
-        required: false
+        required: true
         default: "oxygen"
       PRODUCT_NAME:
         description: "Product to build:"
-        required: False
+        required: true
         default: "oxygen"
       BUILD_COMMAND:
         description: 'Command to be used for compiling:'
         required: true
-        default: 'lunch lineage_bramble-bp4a-user && mka bacon'
+        default: 'mka bacon'
       BUILD_TYPE:
         description: 'Type of build:'
-        required: false
+        required: true
         default: 'userdebug'
         type: choice
         options: 
@@ -209,7 +209,7 @@ jobs:
         elif [[ "${{ github.event.inputs.BASE_PROJECT }}" == "RisingOS 15 Revived" ]] && [[ "${{ github.event.inputs.BUILD_DIFFERENT_ROM }}" == "echo 'Build Starting!'" ]]; then
             LUNCH="riseup ${{ github.event.inputs.PRODUCT_NAME }} ${{ github.event.inputs.BUILD_TYPE }}"
         else
-            LUNCH="breakfast ${{ github.event.inputs.PRODUCT_NAME }} ${{ github.event.inputs.BUILD_TYPE }}"
+            LUNCH="lunch ${{ github.event.inputs.PRODUCT_NAME }}-${{ github.event.inputs.BUILD_TYPE }}"
         fi
 
           if [[ "${{ github.event.inputs.LOCAL_MANIFEST }}" =~ \.xml(/)?$ ]]; then
@@ -537,7 +537,7 @@ jobs:
         echo "Run ID: ${{ github.run_id }}"; \
 
         # Build the ROM
-        #$LUNCH && \
+        $LUNCH && \
         #make installclean && \
         ${{ github.event.inputs.BUILD_COMMAND }}"
       timeout-minutes: 1440
