@@ -45,16 +45,16 @@ on:
         default: 'lineage-21-qpr3'
       DEVICE_NAME:
         description: "Device's codename:"
-        required: true
+        required: false
         default: "oxygen"
       PRODUCT_NAME:
         description: "Product to build:"
-        required: true
+        required: False
         default: "oxygen"
       BUILD_COMMAND:
         description: 'Command to be used for compiling:'
         required: true
-        default: 'mka bacon'
+        default: 'lunch lineage_bramble-bp4a-user && mka bacon'
       BUILD_TYPE:
         description: 'Type of build:'
         required: true
@@ -537,8 +537,8 @@ jobs:
         echo "Run ID: ${{ github.run_id }}"; \
 
         # Build the ROM
-        $LUNCH && \
-        make installclean && \
+        #$LUNCH && \
+        #make installclean && \
         ${{ github.event.inputs.BUILD_COMMAND }}"
       timeout-minutes: 1440
 
