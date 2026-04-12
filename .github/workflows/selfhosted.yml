@@ -55,23 +55,23 @@ on:
         description: 'Command to be used for compiling:'
         required: true
         default: 'lunch lineage_bramble-bp4a-user && mka bacon'
-      BUILD_TYPE:
-        description: 'Type of build:'
-        required: false
-        default: 'userdebug'
-        type: choice
-        options: 
-        - 'eng'
-        - 'userdebug'
-        - 'user' 
-      CLEAN_BUILD:
-        description: 'Build with a clean workspace?'
-        required: false
-        default: 'no'
-        type: choice
-        options: 
-        - 'yes'
-        - 'no'
+      #BUILD_TYPE:
+       # description: 'Type of build:'
+        #required: false
+        #default: 'userdebug'
+        #type: choice
+        #options: 
+       # - 'eng'
+        #- 'userdebug'
+       #- 'user' 
+      #CLEAN_BUILD:
+        #description: 'Build with a clean workspace?'
+        #required: false
+        #default: 'no'
+        #type: choice
+        #options: 
+        #- 'yes'
+       # - 'no'
 
 jobs:
   Start-Runner:
