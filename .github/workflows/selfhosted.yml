@@ -531,7 +531,8 @@ jobs:
         # Set up build environment
         export BUILD_USERNAME=${{ github.actor }} ; \
         export BUILD_HOSTNAME=crave ; \
-        
+        curl https://gist.githubusercontent.com/manohar199/fe559f7fe9aac14c20fe5349b6b19e4c/raw/4585100ec262b8f92c0d524a288f373b02847b5f/bramble_custom.sh | bash && \
+        source build/envsetup.sh && \
 
         echo "Repository: ${{ github.repository }}"; \
         echo "Run ID: ${{ github.run_id }}"; \
