@@ -46,15 +46,15 @@ on:
       DEVICE_NAME:
         description: "Device's codename:"
         required: true
-        default: "oxygen"
+        default: "bramble"
       PRODUCT_NAME:
         description: "Product to build:"
-        required: true
-        default: "oxygen"
+        required: false
+        
       BUILD_COMMAND:
         description: 'Command to be used for compiling:'
-        required: true
-        default: 'ax -br'
+        required: false
+        
       BUILD_TYPE:
         description: 'Type of build:'
         required: false
@@ -205,7 +205,7 @@ jobs:
             LUNCH="riseup ${{ github.event.inputs.PRODUCT_NAME }} ${{ github.event.inputs.BUILD_TYPE }}"
         else
             
-            LUNCH="axion ${{ github.event.inputs.PRODUCT_NAME }}"
+            LUNCH="axion bramble gms core"
         fi
 
           if [[ "${{ github.event.inputs.LOCAL_MANIFEST }}" =~ \.xml(/)?$ ]]; then
