@@ -57,13 +57,8 @@ on:
         default: 'ax -br'
       BUILD_TYPE:
         description: 'Type of build:'
-        required: true
-        default: 'userdebug'
-        type: choice
-        options: 
-        - 'eng'
-        - 'userdebug'
-        - 'user' 
+        required: false
+        
       CLEAN_BUILD:
         description: 'Build with a clean workspace?'
         required: true
