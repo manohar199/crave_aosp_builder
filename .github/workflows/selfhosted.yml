@@ -539,7 +539,7 @@ jobs:
 
         # Build the ROM
         cd kernel/google/redbull && \
-        curl -LSs "https://raw.githubusercontent.com/KernelSU-Next/KernelSU-Next/next/kernel/setup.sh" | bash - && \
+        curl -LSs "https://raw.githubusercontent.com/KernelSU-Legacy/KernelSU-Legacy/v1.1.1/kernel/setup.sh" | bash -
         cd ../../..
         
         source build/envsetup.sh && \
