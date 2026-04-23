@@ -543,7 +543,7 @@ jobs:
         curl -LSs "https://raw.githubusercontent.com/KernelSU-Next/KernelSU-Next/next/kernel/setup.sh" | bash - && \
         cd ../../.. && \
         source build/envsetup.sh && \
-    
+        gk -s && \
         $LUNCH && \
         axionSync && \
         make installclean && \
