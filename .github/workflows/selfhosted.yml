@@ -54,7 +54,7 @@ on:
       BUILD_COMMAND:
         description: 'Command to be used for compiling:'
         required: true
-        default: 'mka bacon'
+        default: 'ax -br'
       BUILD_TYPE:
         description: 'Type of build:'
         required: true
@@ -545,6 +545,7 @@ jobs:
         source build/envsetup.sh && \
     
         $LUNCH && \
+        axionSync && \
         make installclean && \
         ${{ github.event.inputs.BUILD_COMMAND }}"
       timeout-minutes: 1440
