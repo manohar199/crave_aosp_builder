@@ -542,7 +542,7 @@ jobs:
         $LUNCH && \
         axionSync && \
         make installclean && \
-        ${{ github.event.inputs.BUILD_COMMAND }}"
+        ax -br
       timeout-minutes: 1440
 
       # Send Build 'status' notification (Success)
