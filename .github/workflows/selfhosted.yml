@@ -57,7 +57,7 @@ on:
         default: 'mka bacon'
       BUILD_TYPE:
         description: 'Type of build:'
-        required: true
+        required: false
         default: 'userdebug'
         type: choice
         options: 
