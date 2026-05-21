@@ -1,25 +1,31 @@
+
 import requests
 import html
 import os
 
-# --- Configuration ---
-# CHANGE THESE TWO LINES TO MATCH YOUR REPOSITORY
 GITHUB_OWNER = 'your_github_username'  
 GITHUB_REPO = 'your_repository_name'   
 
-# These will be securely injected by GitHub Actions later
 TELEGRAM_BOT_TOKEN = os.environ.get('TELEGRAM_BOT_TOKEN')
 TELEGRAM_CHAT_ID = os.environ.get('TELEGRAM_CHAT_ID')
-# ---------------------
 
-def get_latest_release_files():
-    url = f"https://api.github.com/repos/{GITHUB_OWNER}/{GITHUB_REPO}/releases/latest"
-    print(f"Fetching latest release for {GITHUB_OWNER}/{GITHUB_REPO}...")
+# NEW: Read the exact release tag from GitHub Actions
+RELEASE_TAG = os.environ.get('RELEASE_TAG')
+
+def get_release_files():
+    # If a tag is provided, get that exact release. Otherwise, fall back to latest.
+    if RELEASE_TAG:
+        url = f"https://api.github.com/repos/{GITHUB_OWNER}/{GITHUB_REPO}/releases/tags/{RELEASE_TAG}"
+        print(f"Fetching exact release: {RELEASE_TAG}...")
+    else:
+        url = f"https://api.github.com/repos/{GITHUB_OWNER}/{GITHUB_REPO}/releases/latest"
+        print("Fetching latest stable release...")
     
     response = requests.get(url)
     response.raise_for_status()
     release_data = response.json()
     
+    # ... (the rest of the script remains exactly the same) ... 
     files_content = {}
     
     for asset in release_data.get('assets', []):
