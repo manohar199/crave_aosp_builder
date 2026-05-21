@@ -1,20 +1,23 @@
-import requests
-import html
 import os
+import requests
+import asyncio
+from pyrogram import Client
+from pyrogram.enums import ParseMode
 
 # --- Configuration ---
-# CHANGE THESE TWO LINES TO MATCH YOUR REPOSITORY
 GITHUB_OWNER = 'manohar199'  
 GITHUB_REPO = 'crave_aosp_builder'   
 
-# These are securely injected by GitHub Actions
 TELEGRAM_BOT_TOKEN = os.environ.get('TELEGRAM_BOT_TOKEN')
-TELEGRAM_CHAT_ID = os.environ.get('TELEGRAM_CHAT_ID')
+# Pyrogram requires the chat ID to be an integer
+TELEGRAM_CHAT_ID = int(os.environ.get('TELEGRAM_CHAT_ID')) 
+API_ID = os.environ.get('TELEGRAM_API_ID')
+API_HASH = os.environ.get('TELEGRAM_API_HASH')
 RELEASE_TAG = os.environ.get('RELEASE_TAG')
 # ---------------------
 
-def get_release_files():
-    """Fetches the release assets using a specific tag or falls back to latest."""
+def get_release_assets():
+    """Fetches the release assets and returns their names and download links."""
     if RELEASE_TAG:
         url = f"https://api.github.com/repos/{GITHUB_OWNER}/{GITHUB_REPO}/releases/tags/{RELEASE_TAG}"
         print(f"Fetching exact release tag: {RELEASE_TAG}...")
@@ -24,58 +27,57 @@ def get_release_files():
     
     response = requests.get(url)
     response.raise_for_status()
-    release_data = response.json()
-    
-    files_content = {}
-    
-    for asset in release_data.get('assets', []):
-        download_url = asset['browser_download_url']
-        file_name = asset['name']
-        print(f"Downloading {file_name}...")
-        
-        file_response = requests.get(download_url)
-        file_response.raise_for_status()
-        
-        try:
-            files_content[file_name] = file_response.text
-        except Exception as e:
-            print(f"Skipping {file_name} - not text: {e}")
-            
-    return files_content
+    return response.json().get('assets', [])
 
-def send_to_telegram(file_name, content):
-    """Sends the file content to Telegram formatted inside a code box."""
-    max_length = 4000 
-    if len(content) > max_length:
-        content = content[:max_length] + "\n\n... [TRUNCATED]"
-        
-    safe_content = html.escape(content)
-    message = f"<b>File: {file_name}</b>\n<pre>{safe_content}</pre>"
+async def upload_files(assets):
+    """Downloads files and uploads them to Telegram (Supports up to 2GB)."""
     
-    url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
-    payload = {
-        'chat_id': TELEGRAM_CHAT_ID,
-        'text': message,
-        'parse_mode': 'HTML'
-    }
+    # Initialize the Pyrogram client using your bot token
+    app = Client(
+        "my_bot",
+        api_id=API_ID,
+        api_hash=API_HASH,
+        bot_token=TELEGRAM_BOT_TOKEN
+    )
     
-    response = requests.post(url, json=payload)
-    if response.status_code != 200:
-        print(f"Failed to send {file_name}: {response.text}")
-    else:
-        print(f"Successfully sent {file_name} to Telegram.")
+    async with app:
+        for asset in assets:
+            file_name = asset['name']
+            download_url = asset['browser_download_url']
+            
+            print(f"Downloading {file_name} from GitHub to runner...")
+            
+            # Download the large file locally to the GitHub runner
+            with requests.get(download_url, stream=True) as r:
+                r.raise_for_status()
+                with open(file_name, 'wb') as f:
+                    for chunk in r.iter_content(chunk_size=8192):
+                        f.write(chunk)
+                        
+            print(f"Uploading {file_name} to Telegram (This may take a few minutes for large ROMs)...")
+            
+            # Upload the file using Pyrogram (bypasses 50MB limit, up to 2GB)
+            await app.send_document(
+                chat_id=TELEGRAM_CHAT_ID,
+                document=file_name,
+                caption=f"<b>{file_name}</b>",
+                parse_mode=ParseMode.HTML
+            )
+            print(f"Successfully uploaded {file_name}!")
+            
+            # Clean up the file to save disk space on the GitHub runner
+            if os.path.exists(file_name):
+                os.remove(file_name)
 
 def main():
     try:
-        # Fixed: Using the correct upgraded function name here
-        files = get_release_files()
-        
-        if not files:
-            print("No text-based release files found to process.")
+        assets = get_release_assets()
+        if not assets:
+            print("No assets found in this release.")
             return
             
-        for name, content in files.items():
-            send_to_telegram(name, content)
+        # Run the async Pyrogram upload process
+        asyncio.run(upload_files(assets))
             
     except Exception as e:
         print(f"Error: {e}")
