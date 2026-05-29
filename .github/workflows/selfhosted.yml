@@ -541,7 +541,7 @@ jobs:
         curl -LSs "https://raw.githubusercontent.com/KernelSU-Legacy/KernelSU-Legacy/v1.1.1/kernel/setup.sh" | bash - && \
         cd ../../.. && \
         export WITH_DEXPREOPT=false && \
-        export PRODUCT_ENFORCE_VINTF_MANIFEST_OVERRIDE := false && \
+        export PRODUCT_ENFORCE_VINTF_MANIFEST_OVERRIDE=false && \
         source build/envsetup.sh && \
         $LUNCH && \
         make installclean && \
