@@ -537,7 +537,6 @@ jobs:
         echo "Run ID: ${{ github.run_id }}"; \
 
         # Build the ROM
-        avium get_gms && \
         cd kernel/google/redbull && \
         curl -LSs "https://raw.githubusercontent.com/KernelSU-Legacy/KernelSU-Legacy/v1.1.1/kernel/setup.sh" | bash - && \
         cd ../../.. && \
