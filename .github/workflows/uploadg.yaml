@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       gdrive_url:
-        description: 'Enter Google Drive URL (Direct or Sharing Link)'
+        description: 'Enter Google Drive URL'
         required: true
         default: 'https://drive.google.com/uc?export=download&id=15Ki1eA9IKuoS1V24Y9NuqACkvDrQO-'
       gofile_url:
@@ -32,10 +32,10 @@ jobs:
 
     - name: Process Downloads and Upload to Telegram
       env:
-        TELEGRAM_API_ID: ${{ secrets.TELEGRAM_API_ID }}
-        TELEGRAM_API_HASH: ${{ secrets.TELEGRAM_API_HASH }}
         TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
         TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        TELEGRAM_API_ID: ${{ secrets.TELEGRAM_API_ID }}
+        TELEGRAM_API_HASH: ${{ secrets.TELEGRAM_API_HASH }}
         GDRIVE_INPUT_URL: ${{ github.event.inputs.gdrive_url }}
         GOFILE_INPUT_URL: ${{ github.event.inputs.gofile_url }}
       run: |
@@ -46,41 +46,56 @@ jobs:
         import requests
         from telethon import TelegramClient
 
-        # 1. Parse Google Drive ID to handle both clean download links and generic share links
+        # --- 1. CONFIGURATION & PARSING ---
         gdrive_raw = os.environ.get('GDRIVE_INPUT_URL', '')
+        gofile_raw = os.environ.get('GOFILE_INPUT_URL', '')
+
+        # Clean Google Drive ID parsing
         file_id_match = re.search(r'(?:id=|/d/)([^/&#?]+)', gdrive_raw)
-        
-        if file_id_match:
-            file_id = file_id_match.group(1)
-            gdrive_download_url = f"https://docs.google.com/uc?export=download&id={file_id}"
-        else:
-            gdrive_download_url = gdrive_raw
+        gdrive_download_url = f"https://docs.google.com/uc?export=download&id={file_id_match.group(1)}" if file_id_match else gdrive_raw
 
-        gofile_url = os.environ.get('GOFILE_INPUT_URL', '')
+        # Dynamic Gofile download URL extraction via Gofile API
+        gofile_download_url = None
+        gofile_id_match = re.search(r'/d/([A-Za-z0-9]+)', gofile_raw)
+        if gofile_id_match:
+            content_id = gofile_id_match.group(1)
+            try:
+                api_res = requests.get(f"https://api.gofile.io/contents/{content_id}").json()
+                if api_res.get("status") == "ok":
+                    children = api_res.get("data", {}).get("children", {})
+                    if children:
+                        # Grab the first file item found inside the target share link directory
+                        first_file_id = list(children.keys())[0]
+                        gofile_download_url = children[first_file_id].get("link")
+            except Exception as e:
+                print(f"Failed parsing Gofile link via API: {e}")
 
-        print(f"Target GDrive Link: {gdrive_download_url}")
-        print(f"Target Gofile Link: {gofile_url}")
+        if not gofile_download_url:
+            gofile_download_url = gofile_raw # Fallback to input string if API lookups fail
 
-        # 2. Download Execution
+        print(f"Target GDrive Download Path: {gdrive_download_url}")
+        print(f"Target Gofile Download Path: {gofile_download_url}")
+
+        # --- 2. DOWNLOAD ENGINE ---
         def download_file(url, output_name):
             try:
-                print(f"Downloading {output_name}...")
+                print(f"Starting download: {output_name}...")
                 with requests.get(url, stream=True, allow_redirects=True) as r:
                     r.raise_for_status()
                     with open(output_name, 'wb') as f:
                         for chunk in r.iter_content(chunk_size=8192):
                             f.write(chunk)
-                print(f"Saved {output_name} successfully.")
+                print(f"Saved {output_name} successfully. Size: {os.path.getsize(output_name)} bytes")
                 return True
             except Exception as e:
                 print(f"Error downloading {output_name}: {e}")
                 return False
 
-        # Execute downloads
+        # Execute local file staging
         download_file(gdrive_download_url, "gdrive_file.zip")
-        download_file(gofile_url, "gofile_file.zip")
+        download_file(gofile_download_url, "gofile_file.zip")
 
-        # 3. Telegram Upload Execution
+        # --- 3. TELEGRAM UPLOAD LOGIC ---
         api_id = int(os.environ['TELEGRAM_API_ID'])
         api_hash = os.environ['TELEGRAM_API_HASH']
         bot_token = os.environ['TELEGRAM_BOT_TOKEN']
@@ -91,12 +106,12 @@ jobs:
         async def upload_to_tg():
             async with TelegramClient('bot_session', api_id, api_hash).start(bot_token=bot_token) as client:
                 for file_path in files_to_upload:
-                    if os.path.exists(file_path) and os.path.getsize(file_path) > 0:
+                    if os.path.exists(file_path) and os.path.getsize(file_path) > 1000: # Ensure file isn't empty/HTML error page
                         print(f"Uploading {file_path} to Telegram...")
-                        await client.send_file(chat_id, file_path, caption=f"Pulled file: {file_path}")
-                        print(f"Finished uploading {file_path}")
+                        await client.send_file(chat_id, file_path, caption=f"Pulled file asset: {file_path}")
+                        print(f"Finished transferring {file_path}")
                     else:
-                        print(f"File {file_path} is empty or missing. Skipping upload.")
+                        print(f"File {file_path} is invalid or missing payload data. Skipping upload.")
 
         if __name__ == '__main__':
             asyncio.run(upload_to_tg())
