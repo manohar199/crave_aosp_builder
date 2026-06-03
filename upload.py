@@ -1,4 +1,5 @@
 import os
+import re
 import sys
 import gdown
 import requests
@@ -13,38 +14,49 @@ print("=" * 60)
 print("Downloading ROM from Google Drive")
 print("=" * 60)
 
+# Extract Google Drive File ID
+match = re.search(r'id=([a-zA-Z0-9_-]+)', FILE_URL)
+
+if not match:
+    print("Could not extract Google Drive file ID")
+    sys.exit(1)
+
+file_id = match.group(1)
+
+print("File ID:", file_id)
+
 try:
     gdown.download(
-        FILE_URL,
-        OUTPUT_FILE,
-        quiet=False,
-        fuzzy=True
+        id=file_id,
+        output=OUTPUT_FILE,
+        quiet=False
     )
 except Exception as e:
-    print(f"Download failed: {e}")
+    print("Download failed:", e)
     sys.exit(1)
 
 if not os.path.exists(OUTPUT_FILE):
-    print("ROM file not found after download")
+    print("Downloaded file not found")
     sys.exit(1)
 
 size = os.path.getsize(OUTPUT_FILE)
 
-print(f"Downloaded size: {size / (1024**3):.2f} GB")
+print(f"Downloaded Size: {size / (1024**3):.2f} GB")
 
 if size < 100 * 1024 * 1024:
-    print("Downloaded file too small. Probably HTML page instead of ROM.")
+    print("Downloaded file is too small.")
+    print("Probably Google Drive returned HTML instead of ROM ZIP.")
     sys.exit(1)
 
 print("=" * 60)
 print("Uploading to Telegram")
 print("=" * 60)
 
-url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendDocument"
+telegram_url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendDocument"
 
 with open(OUTPUT_FILE, "rb") as f:
     response = requests.post(
-        url,
+        telegram_url,
         data={
             "chat_id": CHAT_ID,
             "caption": f"ROM ZIP ({size/(1024**3):.2f} GB)"
@@ -52,15 +64,15 @@ with open(OUTPUT_FILE, "rb") as f:
         files={
             "document": f
         },
-        timeout=3600
+        timeout=7200
     )
 
-print("Telegram response:")
+print("Telegram Response:")
 print(response.text)
 
 if response.status_code != 200:
     sys.exit(1)
 
 print("=" * 60)
-print("Upload completed successfully")
+print("Completed Successfully")
 print("=" * 60)
