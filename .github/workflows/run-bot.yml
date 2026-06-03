@@ -1,0 +1,95 @@
+name: Run GoFile Telegram Bot
+
+on:
+  # ── Start the bot manually from the Actions tab ───────────────────────────
+  workflow_dispatch:
+    inputs:
+      duration_minutes:
+        description: 'How long to run the bot (minutes, max 350)'
+        required: false
+        default: '60'
+
+  # ── Or auto-start on every push to main ───────────────────────────────────
+  push:
+    branches: [main, master]
+
+jobs:
+  run-bot:
+    name: GoFile Telegram Bot
+    runs-on: ubuntu-latest
+
+    steps:
+      # ── 1. Checkout source ─────────────────────────────────────────────────
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      # ── 2. Set up Python 3.9 (matches runtime.txt) ────────────────────────
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.9'
+          cache: 'pip'
+
+      # ── 3. Install dependencies ────────────────────────────────────────────
+      - name: Install Dependencies
+        run: |
+          pip install --upgrade pip
+          pip install -r requirements.txt
+
+      # ── 4. Validate secrets are present before starting ───────────────────
+      - name: Validate Secrets
+        env:
+          TELEGRAM_API_ID:    ${{ secrets.TELEGRAM_API_ID }}
+          TELEGRAM_API_HASH:  ${{ secrets.TELEGRAM_API_HASH }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID:   ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: |
+          echo "Checking required secrets..."
+          MISSING=0
+
+          [[ -z "$TELEGRAM_API_ID"    ]] && echo "TELEGRAM_API_ID is not set"    && MISSING=1
+          [[ -z "$TELEGRAM_API_HASH"  ]] && echo "TELEGRAM_API_HASH is not set"  && MISSING=1
+          [[ -z "$TELEGRAM_BOT_TOKEN" ]] && echo "TELEGRAM_BOT_TOKEN is not set" && MISSING=1
+          [[ -z "$TELEGRAM_CHAT_ID"   ]] && echo "TELEGRAM_CHAT_ID is not set"   && MISSING=1
+
+          if [[ "$MISSING" -eq 1 ]]; then
+            echo ""
+            echo "Add missing secrets at:"
+            echo "GitHub repo → Settings → Secrets and variables → Actions → New repository secret"
+            exit 1
+          fi
+
+          echo "All required secrets are present."
+
+      # ── 5. Run the bot ─────────────────────────────────────────────────────
+      # GitHub Actions jobs have a 6-hour limit. The bot runs for the
+      # requested duration then exits cleanly so the workflow can finish.
+      - name: Run Bot
+        env:
+          TELEGRAM_API_ID:    ${{ secrets.TELEGRAM_API_ID }}
+          TELEGRAM_API_HASH:  ${{ secrets.TELEGRAM_API_HASH }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID:   ${{ secrets.TELEGRAM_CHAT_ID }}
+          MUST_JOIN:          ${{ secrets.MUST_JOIN }}
+          # DATABASE_URL is optional — only needed for ban/stats features
+          # DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        run: |
+          DURATION="${{ github.event.inputs.duration_minutes }}"
+          DURATION="${DURATION:-60}"
+
+          # Cap at 350 minutes (GitHub Actions 6h limit with headroom)
+          if (( DURATION > 350 )); then
+            echo "Capping duration to 350 minutes (GitHub Actions limit)."
+            DURATION=350
+          fi
+
+          echo "Starting GoFile Telegram Bot for ${DURATION} minutes..."
+          echo "Repo   : ${{ github.repository }}"
+          echo "Commit : ${{ github.sha }}"
+          echo ""
+
+          # Run bot with a timeout; exit 0 so the workflow reports success
+          timeout "${DURATION}m" python3 bot.py || true
+
+          echo ""
+          echo "Bot session ended after ${DURATION} minutes."
