@@ -29,9 +29,6 @@ jobs:
           sudo apt-get install -y -qq jq curl wget
 
       # ── 2. Detect URL type ──────────────────────────────────────────────────
-      # NOTE: We intentionally avoid putting & inside bash [[ =~ ]] regex
-      # because the shell treats it as a special token and throws a syntax error.
-      # Instead we use grep -oP to safely extract IDs from URLs that contain &.
       - name: Detect URL Type
         id: detect
         run: |
@@ -179,25 +176,28 @@ jobs:
           DOWNLOAD_URL="https://drive.usercontent.google.com/download?id=${FILE_ID}&export=download&confirm=t"
 
           # Step 1: initial request (catches virus-scan confirmation page for large files)
+          # We save the headers natively to look for filename data later without broken secondary calls
           HTTP_STATUS=$(curl -L -s -c /tmp/gdrive_cookies.txt \
-            -o /tmp/gdrive_initial.html \
+            -D /tmp/gdrive_headers.txt \
+            -o /tmp/gdrive_initial.bin \
             -w "%{http_code}" \
             -A "Mozilla/5.0 (X11; Linux x86_64)" \
             "$DOWNLOAD_URL")
 
           echo "Initial HTTP status: $HTTP_STATUS"
 
-          # Step 2: if Google returned a confirmation page, follow it
-          if grep -q "confirm=" /tmp/gdrive_initial.html 2>/dev/null; then
+          # Step 2: if Google returned a confirmation HTML page instead of the stream, follow it
+          if grep -q "confirm=" /tmp/gdrive_initial.bin 2>/dev/null; then
             echo "🔄 Large file — following Google confirmation..."
 
-            CONFIRM=$(grep -oP 'confirm=\K[a-zA-Z0-9_-]+' /tmp/gdrive_initial.html | head -1)
-            UUID=$(grep -oP 'uuid=\K[a-zA-Z0-9_-]+' /tmp/gdrive_initial.html | head -1 || true)
+            CONFIRM=$(grep -oP 'confirm=\K[a-zA-Z0-9_-]+' /tmp/gdrive_initial.bin | head -1)
+            UUID=$(grep -oP 'uuid=\K[a-zA-Z0-9_-]+' /tmp/gdrive_initial.bin | head -1 || true)
 
             CONFIRM_URL="https://drive.usercontent.google.com/download?id=${FILE_ID}&export=download&confirm=${CONFIRM}"
             [[ -n "$UUID" ]] && CONFIRM_URL="${CONFIRM_URL}&uuid=${UUID}"
 
             HTTP_STATUS=$(curl -L -s -b /tmp/gdrive_cookies.txt \
+              -D /tmp/gdrive_headers.txt \
               -o /tmp/gdrive_file.bin \
               -w "%{http_code}" \
               -A "Mozilla/5.0 (X11; Linux x86_64)" \
@@ -206,19 +206,11 @@ jobs:
             echo "Confirmation HTTP status: $HTTP_STATUS"
             FINAL_FILE="/tmp/gdrive_file.bin"
           else
-            FINAL_FILE="/tmp/gdrive_initial.html"
+            FINAL_FILE="/tmp/gdrive_initial.bin"
           fi
 
-          # Step 3: detect filename from Content-Disposition header
-          FILENAME=$(curl -L -s -I \
-            -A "Mozilla/5.0 (X11; Linux x86_64)" \
-            -b /tmp/gdrive_cookies.txt \
-            "$DOWNLOAD_URL" \
-            | grep -i "content-disposition" \
-            | grep -oP 'filename[*]?=\K[^;"\r\n]+' \
-            | sed "s/^['\"]//;s/['\"]$//" \
-            | head -1 \
-            | tr -d '\r')
+          # Step 3: detect filename from saved headers
+          FILENAME=$(grep -i "content-disposition" /tmp/gdrive_headers.txt | grep -oP 'filename\*?=(UTF-8\'\')?\K[^;"\r\n]+' | sed "s/^['\"]//;s/['\"]$//" | head -1 | tr -d '\r')
 
           if [[ -z "$FILENAME" ]]; then
             FILENAME="gdrive_${FILE_ID}.bin"
@@ -258,11 +250,18 @@ jobs:
             SOURCE_LABEL="☁️ Google Drive"
           fi
 
+          # Enable nullglob so empty download directory won't literalize the '*'
+          shopt -s nullglob
           FILES=(/tmp/downloads/*)
           TOTAL=${#FILES[@]}
           SUCCESS=0
           FAIL=0
           SKIPPED=0
+
+          if (( TOTAL == 0 )); then
+            echo "❌ No files found to send."
+            exit 1
+          fi
 
           for FILE in "${FILES[@]}"; do
             [[ ! -f "$FILE" ]] && continue
@@ -328,8 +327,3 @@ Run: ${RUN_URL}"
             -d "chat_id=$CHAT_ID" \
             --data-urlencode "text=$SUMMARY" \
             "https://api.telegram.org/bot$BOT_TOKEN/sendMessage"
-
-          if (( FAIL > 0 )); then
-            echo "❌ Some files failed to send."
-            exit 1
-          fi
