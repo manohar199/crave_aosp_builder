@@ -1,18 +1,18 @@
-name: GoFile → Telegram Transfer
+name: GoFile / Google Drive → Telegram Transfer
 
 on:
   workflow_dispatch:
     inputs:
-      gofile_url:
-        description: '🔗 GoFile URL (e.g. https://gofile.io/d/sOfZiq)'
+      file_url:
+        description: '🔗 GoFile URL (https://gofile.io/d/XXXXX) or Google Drive URL (https://drive.usercontent.google.com/download?id=... or https://drive.google.com/file/d/...)'
         required: true
         type: string
       caption:
         description: '💬 Optional message caption'
         required: false
-        default: 'File transferred from GoFile via GitHub Actions'
-      password:
-        description: '🔒 GoFile folder password (leave blank if none)'
+        default: 'File transferred via GitHub Actions'
+      gofile_password:
+        description: '🔒 GoFile folder password (only for GoFile links, leave blank if none)'
         required: false
         default: ''
 
@@ -22,176 +22,242 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      # ── 1. Validate the GoFile URL ──────────────────────────────────────────
-      - name: Validate Input URL
-        id: validate
-        run: |
-          URL="${{ github.event.inputs.gofile_url }}"
-
-          # Extract content ID from URL like https://gofile.io/d/XXXXXXX
-          if [[ "$URL" =~ gofile\.io/d/([a-zA-Z0-9]+) ]]; then
-            CONTENT_ID="${BASH_REMATCH[1]}"
-            echo "content_id=$CONTENT_ID" >> "$GITHUB_OUTPUT"
-            echo "✅ Valid GoFile URL. Content ID: $CONTENT_ID"
-          else
-            echo "❌ Invalid GoFile URL: $URL"
-            echo "   Expected format: https://gofile.io/d/XXXXXXX"
-            exit 1
-          fi
-
-      # ── 2. Install dependencies ─────────────────────────────────────────────
+      # ── 1. Install dependencies ─────────────────────────────────────────────
       - name: Install Dependencies
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y -qq jq curl wget
 
-      # ── 3. Get GoFile guest token ───────────────────────────────────────────
-      - name: Get GoFile Guest Token
-        id: token
+      # ── 2. Detect URL type ──────────────────────────────────────────────────
+      - name: Detect URL Type
+        id: detect
+        run: |
+          URL="${{ github.event.inputs.file_url }}"
+          echo "Input URL: $URL"
+
+          if [[ "$URL" =~ gofile\.io/d/([a-zA-Z0-9]+) ]]; then
+            echo "url_type=gofile" >> "$GITHUB_OUTPUT"
+            echo "content_id=${BASH_REMATCH[1]}" >> "$GITHUB_OUTPUT"
+            echo "✅ Detected: GoFile URL — Content ID: ${BASH_REMATCH[1]}"
+
+          elif [[ "$URL" =~ drive\.usercontent\.google\.com/download\?id=([a-zA-Z0-9_-]+) ]]; then
+            echo "url_type=gdrive_direct" >> "$GITHUB_OUTPUT"
+            echo "file_id=${BASH_REMATCH[1]}" >> "$GITHUB_OUTPUT"
+            echo "✅ Detected: Google Drive direct download URL — File ID: ${BASH_REMATCH[1]}"
+
+          elif [[ "$URL" =~ drive\.google\.com/file/d/([a-zA-Z0-9_-]+) ]]; then
+            echo "url_type=gdrive_share" >> "$GITHUB_OUTPUT"
+            echo "file_id=${BASH_REMATCH[1]}" >> "$GITHUB_OUTPUT"
+            echo "✅ Detected: Google Drive share URL — File ID: ${BASH_REMATCH[1]}"
+
+          elif [[ "$URL" =~ drive\.google\.com.*[?&]id=([a-zA-Z0-9_-]+) ]]; then
+            echo "url_type=gdrive_share" >> "$GITHUB_OUTPUT"
+            echo "file_id=${BASH_REMATCH[1]}" >> "$GITHUB_OUTPUT"
+            echo "✅ Detected: Google Drive legacy URL — File ID: ${BASH_REMATCH[1]}"
+
+          else
+            echo "❌ Unsupported URL format."
+            echo "   Supported formats:"
+            echo "     • https://gofile.io/d/XXXXXXX"
+            echo "     • https://drive.usercontent.google.com/download?id=XXXX&export=download"
+            echo "     • https://drive.google.com/file/d/XXXX/view"
+            exit 1
+          fi
+
+      # ════════════════════════════════════════════════════════════════════════
+      #  GOFILE BRANCH
+      # ════════════════════════════════════════════════════════════════════════
+
+      - name: "[GoFile] Get Guest Token"
+        id: gf_token
+        if: steps.detect.outputs.url_type == 'gofile'
         run: |
           echo "🔑 Fetching GoFile guest token..."
-
           RESPONSE=$(curl -s -X POST "https://api.gofile.io/accounts" \
             -H "Content-Type: application/json")
-
-          echo "Token response: $RESPONSE"
-
           STATUS=$(echo "$RESPONSE" | jq -r '.status')
           if [[ "$STATUS" != "ok" ]]; then
             echo "❌ Failed to get guest token"
             echo "$RESPONSE"
             exit 1
           fi
-
           TOKEN=$(echo "$RESPONSE" | jq -r '.data.token')
           echo "guest_token=$TOKEN" >> "$GITHUB_OUTPUT"
-          echo "✅ Got guest token"
+          echo "✅ Guest token obtained"
 
-      # ── 4. Fetch file list from GoFile API ──────────────────────────────────
-      - name: Fetch GoFile Content Info
-        id: content
+      - name: "[GoFile] Fetch Content Info"
+        id: gf_content
+        if: steps.detect.outputs.url_type == 'gofile'
         env:
-          CONTENT_ID: ${{ steps.validate.outputs.content_id }}
-          GUEST_TOKEN: ${{ steps.token.outputs.guest_token }}
-          PASSWORD: ${{ github.event.inputs.password }}
+          CONTENT_ID: ${{ steps.detect.outputs.content_id }}
+          GUEST_TOKEN: ${{ steps.gf_token.outputs.guest_token }}
+          PASSWORD: ${{ github.event.inputs.gofile_password }}
         run: |
           echo "📂 Fetching content info for ID: $CONTENT_ID"
-
           API_URL="https://api.gofile.io/contents/$CONTENT_ID?wt=4fd6sg89d7s6&cache=true"
-
-          # Append password hash if provided
           if [[ -n "$PASSWORD" ]]; then
             PASS_HASH=$(echo -n "$PASSWORD" | sha256sum | awk '{print $1}')
             API_URL="${API_URL}&password=$PASS_HASH"
           fi
-
-          RESPONSE=$(curl -s "$API_URL" \
-            -H "Authorization: Bearer $GUEST_TOKEN")
-
-          echo "Content response:"
-          echo "$RESPONSE" | jq '.'
-
+          RESPONSE=$(curl -s "$API_URL" -H "Authorization: Bearer $GUEST_TOKEN")
           STATUS=$(echo "$RESPONSE" | jq -r '.status')
           if [[ "$STATUS" != "ok" ]]; then
-            echo "❌ Failed to fetch content. Status: $STATUS"
-            MSG=$(echo "$RESPONSE" | jq -r '.message // "Unknown error"')
-            echo "   Message: $MSG"
+            echo "❌ Failed to fetch GoFile content"
+            echo "$RESPONSE" | jq '.'
             exit 1
           fi
-
-          TYPE=$(echo "$RESPONSE" | jq -r '.data.type')
-          echo "content_type=$TYPE" >> "$GITHUB_OUTPUT"
-
-          # Save full response for next step
           echo "$RESPONSE" > /tmp/gofile_content.json
-          echo "✅ Content info fetched. Type: $TYPE"
+          TYPE=$(echo "$RESPONSE" | jq -r '.data.type')
+          echo "✅ Content type: $TYPE"
 
-      # ── 5. Download all files ───────────────────────────────────────────────
-      - name: Download Files from GoFile
-        id: download
+      - name: "[GoFile] Download Files"
+        id: gf_download
+        if: steps.detect.outputs.url_type == 'gofile'
         env:
-          GUEST_TOKEN: ${{ steps.token.outputs.guest_token }}
+          GUEST_TOKEN: ${{ steps.gf_token.outputs.guest_token }}
         run: |
-          mkdir -p /tmp/gofile_downloads
+          mkdir -p /tmp/downloads
 
-          CONTENT_TYPE=$(jq -r '.data.type' /tmp/gofile_content.json)
+          TYPE=$(jq -r '.data.type' /tmp/gofile_content.json)
 
-          echo "📥 Downloading files (content type: $CONTENT_TYPE)..."
-
-          # Build a flat list of all files (handles both file and folder types)
-          if [[ "$CONTENT_TYPE" == "file" ]]; then
-            # Single file at root
-            jq -r '[.data | {name: .name, link: .link, size: .size, md5: .md5}]' \
+          if [[ "$TYPE" == "file" ]]; then
+            jq -r '[.data | {name: .name, link: .link, size: .size}]' \
               /tmp/gofile_content.json > /tmp/file_list.json
           else
-            # Folder — extract all children of type "file"
-            jq '[.data.children[] | select(.type == "file") | {name: .name, link: .link, size: .size, md5: .md5}]' \
+            jq '[.data.children[] | select(.type == "file") | {name: .name, link: .link, size: .size}]' \
               /tmp/gofile_content.json > /tmp/file_list.json
           fi
 
-          echo "Files to download:"
-          jq '.' /tmp/file_list.json
-
           FILE_COUNT=$(jq 'length' /tmp/file_list.json)
-          echo "file_count=$FILE_COUNT" >> "$GITHUB_OUTPUT"
+          echo "📋 Files found: $FILE_COUNT"
 
           if [[ "$FILE_COUNT" -eq 0 ]]; then
-            echo "⚠️  No files found in this GoFile link."
+            echo "❌ No files found in GoFile link."
             exit 1
           fi
 
-          # Download each file
-          DOWNLOADED=0
           for i in $(seq 0 $((FILE_COUNT - 1))); do
             NAME=$(jq -r ".[$i].name" /tmp/file_list.json)
             LINK=$(jq -r ".[$i].link" /tmp/file_list.json)
             SIZE=$(jq -r ".[$i].size" /tmp/file_list.json)
-
-            echo ""
-            echo "⬇️  [$((i+1))/$FILE_COUNT] Downloading: $NAME ($SIZE bytes)"
-            echo "    URL: $LINK"
-
-            HTTP_STATUS=$(curl -L -s -o "/tmp/gofile_downloads/$NAME" \
-              -w "%{http_code}" \
+            echo "⬇️  [$((i+1))/$FILE_COUNT] $NAME ($SIZE bytes)"
+            HTTP_STATUS=$(curl -L -s -o "/tmp/downloads/$NAME" -w "%{http_code}" \
               -H "Authorization: Bearer $GUEST_TOKEN" \
               -H "Cookie: accountToken=$GUEST_TOKEN" \
               "$LINK")
-
             if [[ "$HTTP_STATUS" == "200" ]]; then
-              echo "    ✅ Downloaded successfully"
-              (( DOWNLOADED++ ))
+              echo "   ✅ Downloaded"
             else
-              echo "    ❌ Download failed (HTTP $HTTP_STATUS)"
+              echo "   ❌ Failed (HTTP $HTTP_STATUS)"
             fi
           done
 
-          echo ""
-          echo "📊 Downloaded $DOWNLOADED / $FILE_COUNT files"
-          echo "downloaded=$DOWNLOADED" >> "$GITHUB_OUTPUT"
+          ls -lh /tmp/downloads/
 
-          ls -lh /tmp/gofile_downloads/
+      # ════════════════════════════════════════════════════════════════════════
+      #  GOOGLE DRIVE BRANCH
+      # ════════════════════════════════════════════════════════════════════════
 
-      # ── 6. Send files to Telegram ───────────────────────────────────────────
+      - name: "[GDrive] Download File"
+        id: gd_download
+        if: |
+          steps.detect.outputs.url_type == 'gdrive_direct' ||
+          steps.detect.outputs.url_type == 'gdrive_share'
+        env:
+          FILE_ID: ${{ steps.detect.outputs.file_id }}
+        run: |
+          mkdir -p /tmp/downloads
+          echo "⬇️  Downloading Google Drive file ID: $FILE_ID"
+
+          # Build the direct download URL
+          DOWNLOAD_URL="https://drive.usercontent.google.com/download?id=${FILE_ID}&export=download&confirm=t"
+
+          # First request — may get a virus-scan warning page for large files
+          HTTP_STATUS=$(curl -L -s -c /tmp/gdrive_cookies.txt \
+            -o /tmp/gdrive_response.html \
+            -w "%{http_code}" \
+            -A "Mozilla/5.0 (X11; Linux x86_64)" \
+            "$DOWNLOAD_URL")
+
+          echo "Initial HTTP status: $HTTP_STATUS"
+
+          # Check if Google returned a virus warning confirmation page
+          if grep -q "confirm=" /tmp/gdrive_response.html 2>/dev/null; then
+            echo "🔄 Large file detected — following confirmation..."
+            CONFIRM=$(grep -o 'confirm=[a-zA-Z0-9_-]*' /tmp/gdrive_response.html | head -1 | cut -d= -f2)
+            UUID=$(grep -o 'uuid=[a-zA-Z0-9_-]*' /tmp/gdrive_response.html | head -1 | cut -d= -f2 || echo "")
+
+            CONFIRM_URL="https://drive.usercontent.google.com/download?id=${FILE_ID}&export=download&confirm=${CONFIRM}"
+            [[ -n "$UUID" ]] && CONFIRM_URL="${CONFIRM_URL}&uuid=${UUID}"
+
+            HTTP_STATUS=$(curl -L -s -b /tmp/gdrive_cookies.txt \
+              -o /tmp/gdrive_response2.bin \
+              -w "%{http_code}" \
+              -A "Mozilla/5.0 (X11; Linux x86_64)" \
+              "$CONFIRM_URL")
+
+            echo "Confirmation HTTP status: $HTTP_STATUS"
+            FINAL_FILE="/tmp/gdrive_response2.bin"
+          else
+            FINAL_FILE="/tmp/gdrive_response.html"
+          fi
+
+          # Try to extract filename from Content-Disposition header
+          FILENAME=$(curl -L -s -I \
+            -A "Mozilla/5.0 (X11; Linux x86_64)" \
+            -b /tmp/gdrive_cookies.txt \
+            "$DOWNLOAD_URL" \
+            | grep -i "content-disposition" \
+            | grep -o 'filename[^;]*' \
+            | sed 's/filename[*]*=//;s/["'\'']//g;s/UTF-8//;s/^[[:space:]]*//' \
+            | head -1)
+
+          # Fallback filename
+          if [[ -z "$FILENAME" ]]; then
+            FILENAME="gdrive_${FILE_ID}"
+            echo "⚠️  Could not detect filename, using: $FILENAME"
+          else
+            echo "📄 Detected filename: $FILENAME"
+          fi
+
+          # Move to downloads with real filename
+          mv "$FINAL_FILE" "/tmp/downloads/$FILENAME"
+
+          FILE_SIZE=$(stat -c%s "/tmp/downloads/$FILENAME")
+          echo "✅ Downloaded: $FILENAME ($FILE_SIZE bytes)"
+          ls -lh /tmp/downloads/
+
+      # ════════════════════════════════════════════════════════════════════════
+      #  SEND TO TELEGRAM (common for both sources)
+      # ════════════════════════════════════════════════════════════════════════
+
       - name: Send Files to Telegram
         env:
-          BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
-          CHAT_ID:   ${{ secrets.TELEGRAM_CHAT_ID }}
-          CAPTION:   ${{ github.event.inputs.caption }}
-          GOFILE_URL: ${{ github.event.inputs.gofile_url }}
+          BOT_TOKEN:  ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          CHAT_ID:    ${{ secrets.TELEGRAM_CHAT_ID }}
+          CAPTION:    ${{ github.event.inputs.caption }}
+          SOURCE_URL: ${{ github.event.inputs.file_url }}
         run: |
           echo "📤 Sending files to Telegram..."
 
           REPO="${{ github.repository }}"
           ACTOR="${{ github.actor }}"
           RUN_URL="https://github.com/$REPO/actions/runs/${{ github.run_id }}"
-          FILES=(/tmp/gofile_downloads/*)
+          URL_TYPE="${{ steps.detect.outputs.url_type }}"
+          MAX_SIZE=$((50 * 1024 * 1024))   # 50 MB Telegram Bot API limit
+
+          # Determine source label for caption
+          if [[ "$URL_TYPE" == "gofile" ]]; then
+            SOURCE_LABEL="📁 GoFile"
+          else
+            SOURCE_LABEL="☁️ Google Drive"
+          fi
+
+          FILES=(/tmp/downloads/*)
           TOTAL=${#FILES[@]}
           SUCCESS=0
           FAIL=0
           SKIPPED=0
-
-          # Telegram Bot API max file size = 50 MB
-          MAX_SIZE=$((50 * 1024 * 1024))
 
           for FILE in "${FILES[@]}"; do
             [[ ! -f "$FILE" ]] && continue
@@ -203,23 +269,18 @@ jobs:
             echo "📤 Sending: $FILENAME ($FILE_SIZE bytes)"
 
             if (( FILE_SIZE > MAX_SIZE )); then
-              echo "   ⚠️  File too large for Bot API (>50 MB), skipping: $FILENAME"
+              echo "   ⚠️  Skipping — exceeds 50 MB Telegram limit"
               (( SKIPPED++ ))
-
-              # Notify on Telegram about skipped file
-              SKIP_MSG=$(printf "⚠️ *Skipped (too large)*\n📁 \`%s\`\n📏 Size: %s bytes\n\nTelegram Bot API limit is 50 MB." \
-                "$FILENAME" "$FILE_SIZE")
               curl -s -o /dev/null \
                 -d "chat_id=$CHAT_ID" \
-                -d "text=$SKIP_MSG" \
+                -d "text=$(printf '⚠️ *Skipped (>50MB)*\n📁 `%s`\n📏 %s bytes\n\nTelegram Bot API max is 50 MB.' "$FILENAME" "$FILE_SIZE")" \
                 -d "parse_mode=Markdown" \
                 "https://api.telegram.org/bot$BOT_TOKEN/sendMessage"
               continue
             fi
 
-            # Build per-file caption
-            FILE_CAPTION=$(printf "📦 *%s*\n\n📁 File: \`%s\`\n📏 Size: %s bytes\n\n🔗 Source: %s\n👤 Triggered by: %s\n\n💬 %s\n\n[🚀 View Run](%s)" \
-              "$REPO" "$FILENAME" "$FILE_SIZE" "$GOFILE_URL" "$ACTOR" "$CAPTION" "$RUN_URL")
+            FILE_CAPTION=$(printf "%s *%s*\n\n📁 File: \`%s\`\n📏 Size: %s bytes\n🔗 Source: %s\n👤 Triggered by: %s\n\n💬 %s\n\n[🚀 View Run](%s)" \
+              "$SOURCE_LABEL" "$REPO" "$FILENAME" "$FILE_SIZE" "$SOURCE_URL" "$ACTOR" "$CAPTION" "$RUN_URL")
 
             HTTP_STATUS=$(curl -s -o /tmp/tg_resp.json -w "%{http_code}" \
               -F "chat_id=$CHAT_ID" \
@@ -229,7 +290,7 @@ jobs:
               "https://api.telegram.org/bot$BOT_TOKEN/sendDocument")
 
             if [[ "$HTTP_STATUS" == "200" ]]; then
-              echo "   ✅ Sent successfully"
+              echo "   ✅ Sent"
               (( SUCCESS++ ))
             else
               echo "   ❌ Failed (HTTP $HTTP_STATUS)"
@@ -237,21 +298,19 @@ jobs:
               (( FAIL++ ))
             fi
 
-            # Respect Telegram rate limit
             sleep 1
           done
 
           echo ""
           echo "══════════════════════════════════"
-          echo "  📊 Final Transfer Summary"
+          echo "  📊 Transfer Summary"
           echo "  ✅ Sent:    $SUCCESS / $TOTAL"
           echo "  ❌ Failed:  $FAIL"
-          echo "  ⚠️  Skipped: $SKIPPED"
+          echo "  ⚠️  Skipped: $SKIPPED (>50 MB)"
           echo "══════════════════════════════════"
 
-          # Send summary message to Telegram
-          SUMMARY=$(printf "✅ *GoFile → Telegram Transfer Done*\n\n📦 Repo: \`%s\`\n🔗 Source: %s\n👤 By: %s\n\n📊 Results:\n• ✅ Sent: %s\n• ❌ Failed: %s\n• ⚠️ Skipped (>50MB): %s\n\n[🚀 View Run](%s)" \
-            "$REPO" "$GOFILE_URL" "$ACTOR" "$SUCCESS" "$FAIL" "$SKIPPED" "$RUN_URL")
+          SUMMARY=$(printf "✅ *Transfer Complete*\n\n%s\n📦 Repo: \`%s\`\n🔗 Source: %s\n👤 By: %s\n\n📊 Results:\n• ✅ Sent: %s\n• ❌ Failed: %s\n• ⚠️ Skipped: %s\n\n[🚀 View Run](%s)" \
+            "$SOURCE_LABEL" "$REPO" "$SOURCE_URL" "$ACTOR" "$SUCCESS" "$FAIL" "$SKIPPED" "$RUN_URL")
 
           curl -s -o /dev/null \
             -d "chat_id=$CHAT_ID" \
@@ -259,7 +318,6 @@ jobs:
             -d "parse_mode=Markdown" \
             "https://api.telegram.org/bot$BOT_TOKEN/sendMessage"
 
-          # Fail workflow if any files failed
           if (( FAIL > 0 )); then
             echo "❌ Some files failed to send."
             exit 1
