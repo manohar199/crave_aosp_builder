@@ -4,9 +4,9 @@ on:
   workflow_dispatch:
     inputs:
       gdrive_url:
-        description: 'Enter Google Drive URL'
+        description: 'Enter Google Drive URL or File ID (Must be publicly shared)'
         required: true
-        default: 'https://drive.google.com/uc?export=download&id=15Ki1eA9IKuoS1V24Y9NuqACkvDrQO-'
+        default: '15Ki1eA9IKuoS1V24Y9NuqACkvDrQO-JI'
       gofile_url:
         description: 'Enter Gofile URL'
         required: true
@@ -28,7 +28,8 @@ jobs:
     - name: Install Dependencies
       run: |
         python -m pip install --upgrade pip
-        pip install requests telethon
+        # Added gdown to handle >100MB Google Drive files automatically
+        pip install requests telethon gdown 
 
     - name: Process Downloads and Upload to Telegram
       env:
@@ -44,15 +45,17 @@ jobs:
         import re
         import asyncio
         import requests
+        import gdown
         from telethon import TelegramClient
 
         # --- 1. CONFIGURATION & PARSING ---
-        gdrive_raw = os.environ.get('GDRIVE_INPUT_URL', '')
-        gofile_raw = os.environ.get('GOFILE_INPUT_URL', '')
+        gdrive_raw = os.environ.get('GDRIVE_INPUT_URL', '').strip()
+        gofile_raw = os.environ.get('GOFILE_INPUT_URL', '').strip()
 
-        # Clean Google Drive ID parsing
-        file_id_match = re.search(r'(?:id=|/d/)([^/&#?]+)', gdrive_raw)
-        gdrive_download_url = f"https://docs.google.com/uc?export=download&id={file_id_match.group(1)}" if file_id_match else gdrive_raw
+        # Extract just the Google Drive File ID
+        # This handles full links or just raw IDs being pasted into the input
+        gdrive_id_match = re.search(r'(?:id=|/d/|/file/d/)([^/&#?]+)', gdrive_raw)
+        gdrive_file_id = gdrive_id_match.group(1) if gdrive_id_match else gdrive_raw
 
         # Dynamic Gofile download URL extraction via Gofile API
         gofile_download_url = None
@@ -64,36 +67,39 @@ jobs:
                 if api_res.get("status") == "ok":
                     children = api_res.get("data", {}).get("children", {})
                     if children:
-                        # Grab the first file item found inside the target share link directory
                         first_file_id = list(children.keys())[0]
                         gofile_download_url = children[first_file_id].get("link")
             except Exception as e:
                 print(f"Failed parsing Gofile link via API: {e}")
 
         if not gofile_download_url:
-            gofile_download_url = gofile_raw # Fallback to input string if API lookups fail
+            gofile_download_url = gofile_raw 
 
-        print(f"Target GDrive Download Path: {gdrive_download_url}")
+        print(f"Target GDrive File ID: {gdrive_file_id}")
         print(f"Target Gofile Download Path: {gofile_download_url}")
 
         # --- 2. DOWNLOAD ENGINE ---
-        def download_file(url, output_name):
-            try:
-                print(f"Starting download: {output_name}...")
-                with requests.get(url, stream=True, allow_redirects=True) as r:
-                    r.raise_for_status()
-                    with open(output_name, 'wb') as f:
-                        for chunk in r.iter_content(chunk_size=8192):
-                            f.write(chunk)
-                print(f"Saved {output_name} successfully. Size: {os.path.getsize(output_name)} bytes")
-                return True
-            except Exception as e:
-                print(f"Error downloading {output_name}: {e}")
-                return False
+        
+        # Download GDrive Large File (Bypasses Virus Warning)
+        print("Starting Google Drive download...")
+        try:
+            gdown.download(id=gdrive_file_id, output="gdrive_file.zip", quiet=False)
+            if os.path.exists("gdrive_file.zip"):
+                print(f"GDrive file saved successfully. Size: {os.path.getsize('gdrive_file.zip')} bytes")
+        except Exception as e:
+            print(f"GDrive download failed: {e}")
 
-        # Execute local file staging
-        download_file(gdrive_download_url, "gdrive_file.zip")
-        download_file(gofile_download_url, "gofile_file.zip")
+        # Download Gofile File
+        print("Starting Gofile download...")
+        try:
+            with requests.get(gofile_download_url, stream=True, allow_redirects=True) as r:
+                r.raise_for_status()
+                with open("gofile_file.zip", 'wb') as f:
+                    for chunk in r.iter_content(chunk_size=8192):
+                        f.write(chunk)
+            print(f"Gofile saved successfully. Size: {os.path.getsize('gofile_file.zip')} bytes")
+        except Exception as e:
+            print(f"Gofile download failed: {e}")
 
         # --- 3. TELEGRAM UPLOAD LOGIC ---
         api_id = int(os.environ['TELEGRAM_API_ID'])
@@ -104,18 +110,17 @@ jobs:
         files_to_upload = ['gdrive_file.zip', 'gofile_file.zip']
 
         async def upload_to_tg():
-            # Corrected async setup: Instantiate the client first, then start it up properly
             client = TelegramClient('bot_session', api_id, api_hash)
             await client.start(bot_token=bot_token)
             
             async with client:
                 for file_path in files_to_upload:
-                    if os.path.exists(file_path) and os.path.getsize(file_path) > 1000: # Ensure file isn't empty/HTML error page
-                        print(f"Uploading {file_path} to Telegram...")
+                    if os.path.exists(file_path) and os.path.getsize(file_path) > 1000:
+                        print(f"Uploading {file_path} to Telegram... This might take a few minutes for a 1.9GB file.")
                         await client.send_file(chat_id, file_path, caption=f"Pulled file asset: {file_path}")
                         print(f"Finished transferring {file_path}")
                     else:
-                        print(f"File {file_path} is invalid or missing payload data. Skipping upload.")
+                        print(f"File {file_path} is invalid, less than 1KB, or missing. Skipping upload.")
 
         if __name__ == '__main__':
             asyncio.run(upload_to_tg())
