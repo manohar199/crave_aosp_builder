@@ -1,44 +1,66 @@
 import os
+import sys
+import gdown
 import requests
 
 FILE_URL = os.environ["FILE_URL"]
 BOT_TOKEN = os.environ["TELEGRAM_BOT_TOKEN"]
 CHAT_ID = os.environ["TELEGRAM_CHAT_ID"]
 
-filename = "downloaded_file"
+OUTPUT_FILE = "rom.zip"
 
-print("Downloading:", FILE_URL)
+print("=" * 60)
+print("Downloading ROM from Google Drive")
+print("=" * 60)
 
-r = requests.get(FILE_URL, stream=True, allow_redirects=True)
+try:
+    gdown.download(
+        FILE_URL,
+        OUTPUT_FILE,
+        quiet=False,
+        fuzzy=True
+    )
+except Exception as e:
+    print(f"Download failed: {e}")
+    sys.exit(1)
 
-print("Status:", r.status_code)
-print("Content-Type:", r.headers.get("content-type"))
+if not os.path.exists(OUTPUT_FILE):
+    print("ROM file not found after download")
+    sys.exit(1)
 
-r.raise_for_status()
+size = os.path.getsize(OUTPUT_FILE)
 
-with open(filename, "wb") as f:
-    for chunk in r.iter_content(8192):
-        if chunk:
-            f.write(chunk)
+print(f"Downloaded size: {size / (1024**3):.2f} GB")
 
-size = os.path.getsize(filename)
+if size < 100 * 1024 * 1024:
+    print("Downloaded file too small. Probably HTML page instead of ROM.")
+    sys.exit(1)
 
-print("Downloaded size:", size, "bytes")
+print("=" * 60)
+print("Uploading to Telegram")
+print("=" * 60)
 
-if size < 10000:
-    print("WARNING: File is suspiciously small")
+url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendDocument"
 
-    with open(filename, "rb") as f:
-        print(f.read(500).decode(errors="ignore"))
-
-print("Uploading to Telegram...")
-
-with open(filename, "rb") as f:
-    resp = requests.post(
-        f"https://api.telegram.org/bot{BOT_TOKEN}/sendDocument",
-        data={"chat_id": CHAT_ID},
-        files={"document": f}
+with open(OUTPUT_FILE, "rb") as f:
+    response = requests.post(
+        url,
+        data={
+            "chat_id": CHAT_ID,
+            "caption": f"ROM ZIP ({size/(1024**3):.2f} GB)"
+        },
+        files={
+            "document": f
+        },
+        timeout=3600
     )
 
 print("Telegram response:")
-print(resp.text)
+print(response.text)
+
+if response.status_code != 200:
+    sys.exit(1)
+
+print("=" * 60)
+print("Upload completed successfully")
+print("=" * 60)
