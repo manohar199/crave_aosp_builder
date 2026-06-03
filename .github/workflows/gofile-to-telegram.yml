@@ -29,31 +29,38 @@ jobs:
           sudo apt-get install -y -qq jq curl wget
 
       # ── 2. Detect URL type ──────────────────────────────────────────────────
+      # NOTE: We intentionally avoid putting & inside bash [[ =~ ]] regex
+      # because the shell treats it as a special token and throws a syntax error.
+      # Instead we use grep -oP to safely extract IDs from URLs that contain &.
       - name: Detect URL Type
         id: detect
         run: |
           URL="${{ github.event.inputs.file_url }}"
           echo "Input URL: $URL"
 
-          if [[ "$URL" =~ gofile\.io/d/([a-zA-Z0-9]+) ]]; then
-            echo "url_type=gofile" >> "$GITHUB_OUTPUT"
-            echo "content_id=${BASH_REMATCH[1]}" >> "$GITHUB_OUTPUT"
-            echo "✅ Detected: GoFile URL — Content ID: ${BASH_REMATCH[1]}"
+          if echo "$URL" | grep -q "gofile\.io/d/"; then
+            CONTENT_ID=$(echo "$URL" | grep -oP "gofile\.io/d/\K[a-zA-Z0-9]+")
+            echo "url_type=gofile"          >> "$GITHUB_OUTPUT"
+            echo "content_id=$CONTENT_ID"  >> "$GITHUB_OUTPUT"
+            echo "✅ Detected: GoFile URL — Content ID: $CONTENT_ID"
 
-          elif [[ "$URL" =~ drive\.usercontent\.google\.com/download\?id=([a-zA-Z0-9_-]+) ]]; then
+          elif echo "$URL" | grep -q "drive\.usercontent\.google\.com"; then
+            FILE_ID=$(echo "$URL" | grep -oP "(?<=[?&]id=)[a-zA-Z0-9_-]+")
             echo "url_type=gdrive_direct" >> "$GITHUB_OUTPUT"
-            echo "file_id=${BASH_REMATCH[1]}" >> "$GITHUB_OUTPUT"
-            echo "✅ Detected: Google Drive direct download URL — File ID: ${BASH_REMATCH[1]}"
+            echo "file_id=$FILE_ID"       >> "$GITHUB_OUTPUT"
+            echo "✅ Detected: Google Drive direct download URL — File ID: $FILE_ID"
 
-          elif [[ "$URL" =~ drive\.google\.com/file/d/([a-zA-Z0-9_-]+) ]]; then
+          elif echo "$URL" | grep -q "drive\.google\.com/file/d/"; then
+            FILE_ID=$(echo "$URL" | grep -oP "drive\.google\.com/file/d/\K[a-zA-Z0-9_-]+")
             echo "url_type=gdrive_share" >> "$GITHUB_OUTPUT"
-            echo "file_id=${BASH_REMATCH[1]}" >> "$GITHUB_OUTPUT"
-            echo "✅ Detected: Google Drive share URL — File ID: ${BASH_REMATCH[1]}"
+            echo "file_id=$FILE_ID"      >> "$GITHUB_OUTPUT"
+            echo "✅ Detected: Google Drive share URL — File ID: $FILE_ID"
 
-          elif [[ "$URL" =~ drive\.google\.com.*[?&]id=([a-zA-Z0-9_-]+) ]]; then
+          elif echo "$URL" | grep -q "drive\.google\.com"; then
+            FILE_ID=$(echo "$URL" | grep -oP "(?<=[?&]id=)[a-zA-Z0-9_-]+")
             echo "url_type=gdrive_share" >> "$GITHUB_OUTPUT"
-            echo "file_id=${BASH_REMATCH[1]}" >> "$GITHUB_OUTPUT"
-            echo "✅ Detected: Google Drive legacy URL — File ID: ${BASH_REMATCH[1]}"
+            echo "file_id=$FILE_ID"      >> "$GITHUB_OUTPUT"
+            echo "✅ Detected: Google Drive legacy URL — File ID: $FILE_ID"
 
           else
             echo "❌ Unsupported URL format."
@@ -169,58 +176,57 @@ jobs:
           mkdir -p /tmp/downloads
           echo "⬇️  Downloading Google Drive file ID: $FILE_ID"
 
-          # Build the direct download URL
           DOWNLOAD_URL="https://drive.usercontent.google.com/download?id=${FILE_ID}&export=download&confirm=t"
 
-          # First request — may get a virus-scan warning page for large files
+          # Step 1: initial request (catches virus-scan confirmation page for large files)
           HTTP_STATUS=$(curl -L -s -c /tmp/gdrive_cookies.txt \
-            -o /tmp/gdrive_response.html \
+            -o /tmp/gdrive_initial.html \
             -w "%{http_code}" \
             -A "Mozilla/5.0 (X11; Linux x86_64)" \
             "$DOWNLOAD_URL")
 
           echo "Initial HTTP status: $HTTP_STATUS"
 
-          # Check if Google returned a virus warning confirmation page
-          if grep -q "confirm=" /tmp/gdrive_response.html 2>/dev/null; then
-            echo "🔄 Large file detected — following confirmation..."
-            CONFIRM=$(grep -o 'confirm=[a-zA-Z0-9_-]*' /tmp/gdrive_response.html | head -1 | cut -d= -f2)
-            UUID=$(grep -o 'uuid=[a-zA-Z0-9_-]*' /tmp/gdrive_response.html | head -1 | cut -d= -f2 || echo "")
+          # Step 2: if Google returned a confirmation page, follow it
+          if grep -q "confirm=" /tmp/gdrive_initial.html 2>/dev/null; then
+            echo "🔄 Large file — following Google confirmation..."
+
+            CONFIRM=$(grep -oP 'confirm=\K[a-zA-Z0-9_-]+' /tmp/gdrive_initial.html | head -1)
+            UUID=$(grep -oP 'uuid=\K[a-zA-Z0-9_-]+' /tmp/gdrive_initial.html | head -1 || true)
 
             CONFIRM_URL="https://drive.usercontent.google.com/download?id=${FILE_ID}&export=download&confirm=${CONFIRM}"
             [[ -n "$UUID" ]] && CONFIRM_URL="${CONFIRM_URL}&uuid=${UUID}"
 
             HTTP_STATUS=$(curl -L -s -b /tmp/gdrive_cookies.txt \
-              -o /tmp/gdrive_response2.bin \
+              -o /tmp/gdrive_file.bin \
               -w "%{http_code}" \
               -A "Mozilla/5.0 (X11; Linux x86_64)" \
               "$CONFIRM_URL")
 
             echo "Confirmation HTTP status: $HTTP_STATUS"
-            FINAL_FILE="/tmp/gdrive_response2.bin"
+            FINAL_FILE="/tmp/gdrive_file.bin"
           else
-            FINAL_FILE="/tmp/gdrive_response.html"
+            FINAL_FILE="/tmp/gdrive_initial.html"
           fi
 
-          # Try to extract filename from Content-Disposition header
+          # Step 3: detect filename from Content-Disposition header
           FILENAME=$(curl -L -s -I \
             -A "Mozilla/5.0 (X11; Linux x86_64)" \
             -b /tmp/gdrive_cookies.txt \
             "$DOWNLOAD_URL" \
             | grep -i "content-disposition" \
-            | grep -o 'filename[^;]*' \
-            | sed 's/filename[*]*=//;s/["'\'']//g;s/UTF-8//;s/^[[:space:]]*//' \
-            | head -1)
+            | grep -oP 'filename[*]?=\K[^;"\r\n]+' \
+            | sed "s/^['\"]//;s/['\"]$//" \
+            | head -1 \
+            | tr -d '\r')
 
-          # Fallback filename
           if [[ -z "$FILENAME" ]]; then
-            FILENAME="gdrive_${FILE_ID}"
+            FILENAME="gdrive_${FILE_ID}.bin"
             echo "⚠️  Could not detect filename, using: $FILENAME"
           else
             echo "📄 Detected filename: $FILENAME"
           fi
 
-          # Move to downloads with real filename
           mv "$FINAL_FILE" "/tmp/downloads/$FILENAME"
 
           FILE_SIZE=$(stat -c%s "/tmp/downloads/$FILENAME")
@@ -228,7 +234,7 @@ jobs:
           ls -lh /tmp/downloads/
 
       # ════════════════════════════════════════════════════════════════════════
-      #  SEND TO TELEGRAM (common for both sources)
+      #  SEND TO TELEGRAM  (common for both sources)
       # ════════════════════════════════════════════════════════════════════════
 
       - name: Send Files to Telegram
@@ -246,7 +252,6 @@ jobs:
           URL_TYPE="${{ steps.detect.outputs.url_type }}"
           MAX_SIZE=$((50 * 1024 * 1024))   # 50 MB Telegram Bot API limit
 
-          # Determine source label for caption
           if [[ "$URL_TYPE" == "gofile" ]]; then
             SOURCE_LABEL="📁 GoFile"
           else
@@ -273,20 +278,23 @@ jobs:
               (( SKIPPED++ ))
               curl -s -o /dev/null \
                 -d "chat_id=$CHAT_ID" \
-                -d "text=$(printf '⚠️ *Skipped (>50MB)*\n📁 `%s`\n📏 %s bytes\n\nTelegram Bot API max is 50 MB.' "$FILENAME" "$FILE_SIZE")" \
-                -d "parse_mode=Markdown" \
+                --data-urlencode "text=⚠️ Skipped (>50MB): $FILENAME — $FILE_SIZE bytes. Telegram Bot API max is 50 MB." \
                 "https://api.telegram.org/bot$BOT_TOKEN/sendMessage"
               continue
             fi
 
-            FILE_CAPTION=$(printf "%s *%s*\n\n📁 File: \`%s\`\n📏 Size: %s bytes\n🔗 Source: %s\n👤 Triggered by: %s\n\n💬 %s\n\n[🚀 View Run](%s)" \
-              "$SOURCE_LABEL" "$REPO" "$FILENAME" "$FILE_SIZE" "$SOURCE_URL" "$ACTOR" "$CAPTION" "$RUN_URL")
+            FILE_CAPTION="${SOURCE_LABEL} ${REPO}
+📁 File: ${FILENAME}
+📏 Size: ${FILE_SIZE} bytes
+🔗 Source: ${SOURCE_URL}
+👤 By: ${ACTOR}
+💬 ${CAPTION}
+🚀 Run: ${RUN_URL}"
 
             HTTP_STATUS=$(curl -s -o /tmp/tg_resp.json -w "%{http_code}" \
               -F "chat_id=$CHAT_ID" \
               -F "document=@$FILE" \
               -F "caption=$FILE_CAPTION" \
-              -F "parse_mode=Markdown" \
               "https://api.telegram.org/bot$BOT_TOKEN/sendDocument")
 
             if [[ "$HTTP_STATUS" == "200" ]]; then
@@ -309,13 +317,16 @@ jobs:
           echo "  ⚠️  Skipped: $SKIPPED (>50 MB)"
           echo "══════════════════════════════════"
 
-          SUMMARY=$(printf "✅ *Transfer Complete*\n\n%s\n📦 Repo: \`%s\`\n🔗 Source: %s\n👤 By: %s\n\n📊 Results:\n• ✅ Sent: %s\n• ❌ Failed: %s\n• ⚠️ Skipped: %s\n\n[🚀 View Run](%s)" \
-            "$SOURCE_LABEL" "$REPO" "$SOURCE_URL" "$ACTOR" "$SUCCESS" "$FAIL" "$SKIPPED" "$RUN_URL")
+          SUMMARY="✅ Transfer Complete
+${SOURCE_LABEL} → Telegram
+Repo: ${REPO}
+By: ${ACTOR}
+Sent: ${SUCCESS} | Failed: ${FAIL} | Skipped: ${SKIPPED}
+Run: ${RUN_URL}"
 
           curl -s -o /dev/null \
             -d "chat_id=$CHAT_ID" \
-            -d "text=$SUMMARY" \
-            -d "parse_mode=Markdown" \
+            --data-urlencode "text=$SUMMARY" \
             "https://api.telegram.org/bot$BOT_TOKEN/sendMessage"
 
           if (( FAIL > 0 )); then
