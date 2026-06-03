@@ -1,0 +1,69 @@
+name: Pull Files and Upload to Telegram
+
+on:
+  workflow_dispatch: # Allows you to trigger this manually from the Actions tab
+
+jobs:
+  download-and-upload:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout Repository
+      uses: actions/checkout@v4
+
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-numeric-version: '3.10'
+        cache: 'pip'
+
+    - name: Install Dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install requests telethon
+
+    - name: Download Files
+      run: |
+        # Download from Google Drive (Using curl with cookie handling for large files)
+        curl -L -c cookies.txt 'https://docs.google.com/uc?export=download&id=15Ki1eA9IKuoS1V24Y9NuqACkvDrQO-' > gdrive_file.zip
+        
+        # Download from Gofile 
+        # Note: Gofile direct downloads usually require finding the specific server node API. 
+        # This uses standard curl, but if it's a folder or private link, API interaction is needed.
+        curl -L "https://gofile.io/d/MXMoqn" -o gofile_download.zip
+
+    - name: Upload to Telegram via Python
+      env:
+        TELEGRAM_API_ID: ${{ secrets.TELEGRAM_API_ID }}
+        TELEGRAM_API_HASH: ${{ secrets.TELEGRAM_API_HASH }}
+        TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+        TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+      run: |
+        cat << 'EOF' > upload.py
+        import os
+        import asyncio
+        from telethon import TelegramClient
+
+        # Fetch secrets from environment variables
+        api_id = int(os.environ['TELEGRAM_API_ID'])
+        api_hash = os.environ['TELEGRAM_API_HASH']
+        bot_token = os.environ['TELEGRAM_BOT_TOKEN']
+        chat_id = int(os.environ['TELEGRAM_CHAT_ID'])
+
+        files_to_upload = ['gdrive_file.zip', 'gofile_download.zip']
+
+        async def main():
+            # Initialize Bot Client
+            async with TelegramClient('bot_session', api_id, api_hash).start(bot_token=bot_token) as client:
+                for file_path in files_to_upload:
+                    if os.path.exists(file_path) and os.path.getsize(file_path) > 0:
+                        print(f"Uploading {file_path}...")
+                        await client.send_file(chat_id, file_path, caption=f"Successfully downloaded: {file_path}")
+                        print(f"Finished uploading {file_path}")
+                    else:
+                        print(f"Skipping {file_path} (File missing or empty)")
+
+        if __name__ == '__main__':
+            asyncio.run(main())
+        EOF
+        python upload.py
