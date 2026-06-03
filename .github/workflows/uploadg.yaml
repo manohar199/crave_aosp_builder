@@ -104,7 +104,11 @@ jobs:
         files_to_upload = ['gdrive_file.zip', 'gofile_file.zip']
 
         async def upload_to_tg():
-            async with TelegramClient('bot_session', api_id, api_hash).start(bot_token=bot_token) as client:
+            # Corrected async setup: Instantiate the client first, then start it up properly
+            client = TelegramClient('bot_session', api_id, api_hash)
+            await client.start(bot_token=bot_token)
+            
+            async with client:
                 for file_path in files_to_upload:
                     if os.path.exists(file_path) and os.path.getsize(file_path) > 1000: # Ensure file isn't empty/HTML error page
                         print(f"Uploading {file_path} to Telegram...")
