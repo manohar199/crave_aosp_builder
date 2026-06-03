@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       gdrive_url:
-        description: 'Enter Google Drive URL or File ID (Must be publicly shared)'
+        description: 'Enter Google Drive URL or File ID (MUST be public!)'
         required: true
         default: '15Ki1eA9IKuoS1V24Y9NuqACkvDrQO-JI'
       gofile_url:
@@ -28,7 +28,6 @@ jobs:
     - name: Install Dependencies
       run: |
         python -m pip install --upgrade pip
-        # Added gdown to handle >100MB Google Drive files automatically
         pip install requests telethon gdown 
 
     - name: Process Downloads and Upload to Telegram
@@ -48,79 +47,88 @@ jobs:
         import gdown
         from telethon import TelegramClient
 
-        # --- 1. CONFIGURATION & PARSING ---
         gdrive_raw = os.environ.get('GDRIVE_INPUT_URL', '').strip()
         gofile_raw = os.environ.get('GOFILE_INPUT_URL', '').strip()
 
-        # Extract just the Google Drive File ID
-        # This handles full links or just raw IDs being pasted into the input
+        # --- 1. GDRIVE PARSING ---
         gdrive_id_match = re.search(r'(?:id=|/d/|/file/d/)([^/&#?]+)', gdrive_raw)
         gdrive_file_id = gdrive_id_match.group(1) if gdrive_id_match else gdrive_raw
 
-        # Dynamic Gofile download URL extraction via Gofile API
+        # --- 2. GOFILE API WITH GUEST TOKEN ---
         gofile_download_url = None
         gofile_id_match = re.search(r'/d/([A-Za-z0-9]+)', gofile_raw)
+        
         if gofile_id_match:
             content_id = gofile_id_match.group(1)
             try:
-                api_res = requests.get(f"https://api.gofile.io/contents/{content_id}").json()
-                if api_res.get("status") == "ok":
-                    children = api_res.get("data", {}).get("children", {})
-                    if children:
-                        first_file_id = list(children.keys())[0]
-                        gofile_download_url = children[first_file_id].get("link")
+                print("Fetching Gofile Guest Token...")
+                token_req = requests.post("https://api.gofile.io/accounts").json()
+                guest_token = token_req.get("data", {}).get("token")
+                
+                if guest_token:
+                    headers = {"Authorization": f"Bearer {guest_token}"}
+                    api_res = requests.get(f"https://api.gofile.io/contents/{content_id}", headers=headers).json()
+                    
+                    if api_res.get("status") == "ok":
+                        children = api_res.get("data", {}).get("children", {})
+                        if children:
+                            first_file_id = list(children.keys())[0]
+                            gofile_download_url = children[first_file_id].get("link")
             except Exception as e:
                 print(f"Failed parsing Gofile link via API: {e}")
 
-        if not gofile_download_url:
-            gofile_download_url = gofile_raw 
-
-        print(f"Target GDrive File ID: {gdrive_file_id}")
-        print(f"Target Gofile Download Path: {gofile_download_url}")
-
-        # --- 2. DOWNLOAD ENGINE ---
-        
-        # Download GDrive Large File (Bypasses Virus Warning)
-        print("Starting Google Drive download...")
+        # --- 3. SECURE DOWNLOAD ENGINE ---
+        print("\n=== Starting Google Drive Download ===")
         try:
-            gdown.download(id=gdrive_file_id, output="gdrive_file.zip", quiet=False)
-            if os.path.exists("gdrive_file.zip"):
-                print(f"GDrive file saved successfully. Size: {os.path.getsize('gdrive_file.zip')} bytes")
+            gdown.download(id=gdrive_file_id, output="gdrive_file.zip", quiet=False, fuzzy=True)
         except Exception as e:
             print(f"GDrive download failed: {e}")
 
-        # Download Gofile File
-        print("Starting Gofile download...")
-        try:
-            with requests.get(gofile_download_url, stream=True, allow_redirects=True) as r:
-                r.raise_for_status()
-                with open("gofile_file.zip", 'wb') as f:
-                    for chunk in r.iter_content(chunk_size=8192):
-                        f.write(chunk)
-            print(f"Gofile saved successfully. Size: {os.path.getsize('gofile_file.zip')} bytes")
-        except Exception as e:
-            print(f"Gofile download failed: {e}")
+        print("\n=== Starting Gofile Download ===")
+        if gofile_download_url:
+            try:
+                with requests.get(gofile_download_url, stream=True, allow_redirects=True) as r:
+                    r.raise_for_status()
+                    with open("gofile_file.zip", 'wb') as f:
+                        for chunk in r.iter_content(chunk_size=8192):
+                            f.write(chunk)
+            except Exception as e:
+                print(f"Gofile download failed: {e}")
+        else:
+            print("Could not extract a direct Gofile download link.")
 
-        # --- 3. TELEGRAM UPLOAD LOGIC ---
+        # --- 4. VALIDATION & UPLOAD LOGIC ---
         api_id = int(os.environ['TELEGRAM_API_ID'])
         api_hash = os.environ['TELEGRAM_API_HASH']
         bot_token = os.environ['TELEGRAM_BOT_TOKEN']
         chat_id = int(os.environ['TELEGRAM_CHAT_ID'])
 
-        files_to_upload = ['gdrive_file.zip', 'gofile_file.zip']
+        files_to_check = ['gdrive_file.zip', 'gofile_file.zip']
+        files_to_upload = []
+
+        # Validate files are actually large data files, not 2KB HTML error pages
+        for file in files_to_check:
+            if os.path.exists(file):
+                size_mb = os.path.getsize(file) / (1024 * 1024)
+                if size_mb > 1.0: # File must be larger than 1MB to be considered valid
+                    files_to_upload.append(file)
+                else:
+                    print(f"WARNING: {file} is only {size_mb:.3f} MB. This is likely an HTML error page. Deleting.")
+                    os.remove(file)
 
         async def upload_to_tg():
+            if not files_to_upload:
+                print("No valid files downloaded. Aborting Telegram upload.")
+                return
+
             client = TelegramClient('bot_session', api_id, api_hash)
             await client.start(bot_token=bot_token)
             
             async with client:
                 for file_path in files_to_upload:
-                    if os.path.exists(file_path) and os.path.getsize(file_path) > 1000:
-                        print(f"Uploading {file_path} to Telegram... This might take a few minutes for a 1.9GB file.")
-                        await client.send_file(chat_id, file_path, caption=f"Pulled file asset: {file_path}")
-                        print(f"Finished transferring {file_path}")
-                    else:
-                        print(f"File {file_path} is invalid, less than 1KB, or missing. Skipping upload.")
+                    print(f"Uploading {file_path} to Telegram... Please wait.")
+                    await client.send_file(chat_id, file_path, caption=f"Pulled valid file asset: {file_path}")
+                    print(f"Finished transferring {file_path}")
 
         if __name__ == '__main__':
             asyncio.run(upload_to_tg())
