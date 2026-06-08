@@ -21,7 +21,7 @@ on:
 
       md5:
         description: "MD5"
-        required: true
+        required: false
 
       banner_image:
         description: "Banner Image URL"
