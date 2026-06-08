@@ -20,8 +20,7 @@ INIT_BOOT_URL = os.environ.get("INIT_BOOT_URL", "")
 VENDOR_BOOT_URL = os.environ.get("VENDOR_BOOT_URL", "")
 DTBO_URL = os.environ.get("DTBO_URL", "")
 
-caption = f"""
-🎁 A fresh package awaits your device!
+
 
 • ROM: {ROM_NAME}
 • SIZE: {ROM_SIZE}
