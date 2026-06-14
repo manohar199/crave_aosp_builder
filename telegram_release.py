@@ -1,58 +1,58 @@
+```python
 import os
-import json
 import requests
 
 BOT_TOKEN = os.environ["TELEGRAM_BOT_TOKEN"]
 CHAT_ID = os.environ["TELEGRAM_CHAT_ID"]
 
 ROM_NAME = os.environ["ROM_NAME"]
-ROM_SIZE = os.environ["ROM_SIZE"]
-DEVICE = os.environ["DEVICE"]
 BUILD_DATE = os.environ["BUILD_DATE"]
-MD5 = os.environ["MD5"]
-
-BANNER_IMAGE = os.environ.get("BANNER_IMAGE", "")
 
 ROM_URL = os.environ["ROM_URL"]
 RECOVERY_URL = os.environ.get("RECOVERY_URL", "")
 BOOT_URL = os.environ.get("BOOT_URL", "")
-INIT_BOOT_URL = os.environ.get("INIT_BOOT_URL", "")
 VENDOR_BOOT_URL = os.environ.get("VENDOR_BOOT_URL", "")
 DTBO_URL = os.environ.get("DTBO_URL", "")
 
+BANNER_IMAGE = os.environ.get("BANNER_IMAGE", "")
 
+CAPTION_TEXT = os.environ.get(
+    "CAPTION_TEXT",
+    "PROXIMA BETA Release"
+)
 
-• ROM: {ROM_NAME}
-• SIZE: {ROM_SIZE}
+CREDITS = os.environ.get(
+    "CREDITS",
+    "AxionOS Team\nVOLD_NAMESPACE"
+)
 
-• DEVICE: {DEVICE}
-• DATE: {BUILD_DATE}
+MAINTAINER = os.environ.get(
+    "MAINTAINER",
+    "@Cmanohar2"
+)
 
-• MD5SUM: {MD5}
-"""
+caption = f"""
+{ROM_NAME}
 
-buttons = []
+Caption:
+{CAPTION_TEXT}
 
-buttons.append([{"text": "📦 Download ROM", "url": ROM_URL}])
+Updated:
+{BUILD_DATE}
 
-if RECOVERY_URL:
-    buttons.append([{"text": "🛠 Download Recovery", "url": RECOVERY_URL}])
+Download:
+ROM: {ROM_URL}
+Recovery: {RECOVERY_URL}
+Boot: {BOOT_URL}
+Vendor_Boot: {VENDOR_BOOT_URL}
+dtbo: {DTBO_URL}
 
-if BOOT_URL:
-    buttons.append([{"text": "⚡ Download Boot", "url": BOOT_URL}])
+Credits:
+{CREDITS}
 
-if INIT_BOOT_URL:
-    buttons.append([{"text": "🚀 Download Init Boot", "url": INIT_BOOT_URL}])
-
-if VENDOR_BOOT_URL:
-    buttons.append([{"text": "🔧 Download Vendor Boot", "url": VENDOR_BOOT_URL}])
-
-if DTBO_URL:
-    buttons.append([{"text": "📁 Download DTBO", "url": DTBO_URL}])
-
-keyboard = {
-    "inline_keyboard": buttons
-}
+Maintainer:
+{MAINTAINER}
+""".strip()
 
 if BANNER_IMAGE:
     response = requests.post(
@@ -60,8 +60,7 @@ if BANNER_IMAGE:
         data={
             "chat_id": CHAT_ID,
             "photo": BANNER_IMAGE,
-            "caption": caption,
-            "reply_markup": json.dumps(keyboard)
+            "caption": caption
         }
     )
 else:
@@ -69,9 +68,9 @@ else:
         f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage",
         data={
             "chat_id": CHAT_ID,
-            "text": caption,
-            "reply_markup": json.dumps(keyboard)
+            "text": caption
         }
     )
 
 print(response.text)
+```
