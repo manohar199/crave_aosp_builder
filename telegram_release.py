@@ -22,46 +22,53 @@ VENDOR_BOOT_URL = os.environ.get("VENDOR_BOOT_URL", "")
 DTBO_URL = os.environ.get("DTBO_URL", "")
 CHANGELOG_URL = os.environ.get("CHANGELOG_URL", "")
 
-download_links = [f"<a href='{ROM_URL}'>ROM</a>"]
+# Download links
+download_text = f"<a href='{ROM_URL}'>ROM</a>"
 
-if BOOT_URL:
-    download_links.append(f"<a href='{BOOT_URL}'>Boot</a>")
+if RECOVERY_URL.strip():
+    download_text += f" | <a href='{RECOVERY_URL}'>Recovery</a>"
 
-if VENDOR_BOOT_URL:
-    download_links.append(f"<a href='{VENDOR_BOOT_URL}'>Vendor_Boot</a>")
+if BOOT_URL.strip():
+    download_text += f" | <a href='{BOOT_URL}'>Boot</a>"
 
-if DTBO_URL:
-    download_links.append(f"<a href='{DTBO_URL}'>dtbo</a>")
+if VENDOR_BOOT_URL.strip():
+    download_text += f" | <a href='{VENDOR_BOOT_URL}'>Vendor_Boot</a>"
 
-download_text = " || ".join(download_links)
+if DTBO_URL.strip():
+    download_text += f" | <a href='{DTBO_URL}'>dtbo</a>"
 
-caption = f"""
-<b>{ROM_NAME}</b>
+caption = f"""<b>{ROM_NAME}</b>
 
 Updated: {BUILD_DATE}
 
 Download: {download_text}
 """
 
-if CHANGELOG_URL:
+if CHANGELOG_URL.strip():
     caption += f"\nChangelog: <a href='{CHANGELOG_URL}'>Changelogs</a>"
 
-if NOTES:
+if NOTES.strip():
     caption += f"\nNotes: {NOTES}"
 
-if MAINTAINER:
+if MAINTAINER.strip():
     caption += f"\n\nMaintainer: {MAINTAINER}"
 
-if CREDITS:
+if CREDITS.strip():
     caption += f"\nCredits: {CREDITS}"
 
-if DEVICE:
+if DEVICE.strip():
     caption += f"\nDevice: {DEVICE}"
 
-if ROM_SIZE:
+if ROM_SIZE.strip():
     caption += f"\nSize: {ROM_SIZE}"
 
-if BANNER_IMAGE:
+print("ROM_URL =", ROM_URL)
+print("RECOVERY_URL =", RECOVERY_URL)
+print("BOOT_URL =", BOOT_URL)
+print("VENDOR_BOOT_URL =", VENDOR_BOOT_URL)
+print("DTBO_URL =", DTBO_URL)
+
+if BANNER_IMAGE.strip():
     response = requests.post(
         f"https://api.telegram.org/bot{BOT_TOKEN}/sendPhoto",
         data={
