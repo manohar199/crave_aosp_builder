@@ -1,4 +1,4 @@
-name: Telegram Release Post
+name: Telegram Release
 
 on:
   workflow_dispatch:
@@ -6,70 +6,87 @@ on:
       rom_name:
         description: "ROM Name"
         required: true
+        type: string
 
       maintainer:
         description: "Maintainer"
         required: true
+        type: string
 
       credits:
         description: "Credits"
         required: false
+        type: string
 
       notes:
         description: "Notes"
         required: false
+        type: string
 
       rom_size:
         description: "ROM Size"
         required: false
+        type: string
 
       device:
         description: "Device"
         required: true
+        type: string
 
       build_date:
         description: "Build Date"
         required: true
+        type: string
 
       banner_image:
         description: "Banner Image URL"
         required: false
+        type: string
 
       rom_url:
         description: "ROM URL"
         required: true
+        type: string
 
       recovery_url:
         description: "Recovery URL"
         required: false
+        type: string
 
       boot_url:
         description: "Boot URL"
         required: false
+        type: string
 
       vendor_boot_url:
         description: "Vendor Boot URL"
         required: false
+        type: string
 
       dtbo_url:
         description: "DTBO URL"
         required: false
+        type: string
 
-    
+      changelog_url:
+        description: "Changelog URL"
+        required: false
+        type: string
 
 jobs:
   telegram:
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout
+        uses: actions/checkout@v4
 
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
 
-      - name: Install Requests
+      - name: Install dependencies
         run: pip install requests
 
       - name: Send Telegram Post
@@ -93,6 +110,7 @@ jobs:
           BOOT_URL: ${{ github.event.inputs.boot_url }}
           VENDOR_BOOT_URL: ${{ github.event.inputs.vendor_boot_url }}
           DTBO_URL: ${{ github.event.inputs.dtbo_url }}
-         
+
+          CHANGELOG_URL: ${{ github.event.inputs.changelog_url }}
 
         run: python telegram_release.py
