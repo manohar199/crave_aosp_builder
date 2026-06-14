@@ -55,9 +55,7 @@ on:
         description: "DTBO URL"
         required: false
 
-      changelog_url:
-        description: "Changelog URL"
-        required: false
+    
 
 jobs:
   telegram:
@@ -95,6 +93,6 @@ jobs:
           BOOT_URL: ${{ github.event.inputs.boot_url }}
           VENDOR_BOOT_URL: ${{ github.event.inputs.vendor_boot_url }}
           DTBO_URL: ${{ github.event.inputs.dtbo_url }}
-          CHANGELOG_URL: ${{ github.event.inputs.changelog_url }}
+         
 
         run: python telegram_release.py
