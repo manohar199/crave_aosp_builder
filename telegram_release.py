@@ -1,4 +1,3 @@
-```python
 import os
 import requests
 
@@ -6,53 +5,61 @@ BOT_TOKEN = os.environ["TELEGRAM_BOT_TOKEN"]
 CHAT_ID = os.environ["TELEGRAM_CHAT_ID"]
 
 ROM_NAME = os.environ["ROM_NAME"]
-BUILD_DATE = os.environ["BUILD_DATE"]
+MAINTAINER = os.environ.get("MAINTAINER", "")
+CREDITS = os.environ.get("CREDITS", "")
+NOTES = os.environ.get("NOTES", "")
+
+ROM_SIZE = os.environ.get("ROM_SIZE", "")
+DEVICE = os.environ.get("DEVICE", "")
+BUILD_DATE = os.environ.get("BUILD_DATE", "")
+
+BANNER_IMAGE = os.environ.get("BANNER_IMAGE", "")
 
 ROM_URL = os.environ["ROM_URL"]
 RECOVERY_URL = os.environ.get("RECOVERY_URL", "")
 BOOT_URL = os.environ.get("BOOT_URL", "")
 VENDOR_BOOT_URL = os.environ.get("VENDOR_BOOT_URL", "")
 DTBO_URL = os.environ.get("DTBO_URL", "")
+CHANGELOG_URL = os.environ.get("CHANGELOG_URL", "")
 
-BANNER_IMAGE = os.environ.get("BANNER_IMAGE", "")
+download_links = [f"<a href='{ROM_URL}'>ROM</a>"]
 
-CAPTION_TEXT = os.environ.get(
-    "CAPTION_TEXT",
-    "PROXIMA BETA Release"
-)
+if BOOT_URL:
+    download_links.append(f"<a href='{BOOT_URL}'>Boot</a>")
 
-CREDITS = os.environ.get(
-    "CREDITS",
-    "AxionOS Team\nVOLD_NAMESPACE"
-)
+if VENDOR_BOOT_URL:
+    download_links.append(f"<a href='{VENDOR_BOOT_URL}'>Vendor_Boot</a>")
 
-MAINTAINER = os.environ.get(
-    "MAINTAINER",
-    "@Cmanohar2"
-)
+if DTBO_URL:
+    download_links.append(f"<a href='{DTBO_URL}'>dtbo</a>")
+
+download_text = " || ".join(download_links)
 
 caption = f"""
-{ROM_NAME}
+<b>{ROM_NAME}</b>
 
-Caption:
-{CAPTION_TEXT}
+Updated: {BUILD_DATE}
 
-Updated:
-{BUILD_DATE}
+Download: {download_text}
+"""
 
-Download:
-ROM: {ROM_URL}
-Recovery: {RECOVERY_URL}
-Boot: {BOOT_URL}
-Vendor_Boot: {VENDOR_BOOT_URL}
-dtbo: {DTBO_URL}
+if CHANGELOG_URL:
+    caption += f"\nChangelog: <a href='{CHANGELOG_URL}'>Changelogs</a>"
 
-Credits:
-{CREDITS}
+if NOTES:
+    caption += f"\nNotes: {NOTES}"
 
-Maintainer:
-{MAINTAINER}
-""".strip()
+if MAINTAINER:
+    caption += f"\n\nMaintainer: {MAINTAINER}"
+
+if CREDITS:
+    caption += f"\nCredits: {CREDITS}"
+
+if DEVICE:
+    caption += f"\nDevice: {DEVICE}"
+
+if ROM_SIZE:
+    caption += f"\nSize: {ROM_SIZE}"
 
 if BANNER_IMAGE:
     response = requests.post(
@@ -60,7 +67,8 @@ if BANNER_IMAGE:
         data={
             "chat_id": CHAT_ID,
             "photo": BANNER_IMAGE,
-            "caption": caption
+            "caption": caption,
+            "parse_mode": "HTML"
         }
     )
 else:
@@ -68,9 +76,9 @@ else:
         f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage",
         data={
             "chat_id": CHAT_ID,
-            "text": caption
+            "text": caption,
+            "parse_mode": "HTML"
         }
     )
 
 print(response.text)
-```
