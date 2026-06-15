@@ -8,20 +8,51 @@ GOFILE_URL = os.environ["GOFILE_URL"]
 TOKEN = os.environ["GITHUB_TOKEN"]
 REPO = os.environ["GITHUB_REPOSITORY"]
 
+
 def extract_id(url):
-    return re.search(r"/d/([A-Za-z0-9]+)", url).group(1)
+    m = re.search(r"/d/([A-Za-z0-9]+)", url)
+    if not m:
+        raise Exception(f"Invalid GoFile URL: {url}")
+    return m.group(1)
 
-def guest_token():
+
+def create_guest_token():
     r = requests.post("https://api.gofile.io/accounts")
-    return r.json()["data"]["token"]
+    r.raise_for_status()
 
-def folder_data(content_id, token):
-    headers = {"Authorization": f"Bearer {token}"}
-    r = requests.get(
-        f"https://api.gofile.io/contents/{content_id}",
-        headers=headers
+    data = r.json()
+
+    if "data" not in data:
+        raise Exception(f"Failed to get GoFile token: {data}")
+
+    return data["data"]["token"]
+
+
+def get_content(content_id, token):
+    headers = {
+        "Authorization": f"Bearer {token}"
+    }
+
+    url = (
+        f"https://api.gofile.io/contents/{content_id}"
+        "?contentFilter=all"
+        "&page=1"
     )
-    return r.json()["data"]
+
+    r = requests.get(url, headers=headers)
+    r.raise_for_status()
+
+    result = r.json()
+
+    print("==== GOFILE RESPONSE ====")
+    print(json.dumps(result, indent=2))
+    print("=========================")
+
+    if "data" not in result:
+        raise Exception(f"Unexpected GoFile response: {result}")
+
+    return result["data"]
+
 
 def create_release():
     tag = datetime.utcnow().strftime("gofile-%Y%m%d-%H%M%S")
@@ -45,16 +76,24 @@ def create_release():
     )
 
     r.raise_for_status()
-    return r.json()
 
-def download(url, path):
+    release = r.json()
+
+    print("Created Release:")
+    print(release["html_url"])
+
+    return release
+
+
+def download_file(url, filename):
     with requests.get(url, stream=True) as r:
         r.raise_for_status()
 
-        with open(path, "wb") as f:
+        with open(filename, "wb") as f:
             for chunk in r.iter_content(1024 * 1024):
                 if chunk:
                     f.write(chunk)
+
 
 def upload_asset(upload_url, file_path):
     upload_url = upload_url.split("{")[0]
@@ -73,29 +112,70 @@ def upload_asset(upload_url, file_path):
 
     r.raise_for_status()
 
-token = guest_token()
-content_id = extract_id(GOFILE_URL)
+    print(f"Uploaded: {os.path.basename(file_path)}")
 
-data = folder_data(content_id, token)
 
-release = create_release()
-upload_url = release["upload_url"]
+def collect_files(node):
+    files = []
 
-for item in data["children"].values():
+    # Folder
+    if "children" in node:
+        for child in node["children"].values():
+            files.extend(collect_files(child))
 
-    if item["type"] != "file":
-        continue
+    # File
+    elif node.get("type") == "file":
+        files.append(node)
 
-    name = item["name"]
+    return files
 
-    print("Downloading:", name)
 
-    download(item["link"], name)
+def main():
+    content_id = extract_id(GOFILE_URL)
 
-    print("Uploading:", name)
+    print("Content ID:", content_id)
 
-    upload_asset(upload_url, name)
+    gofile_token = create_guest_token()
 
-    os.remove(name)
+    data = get_content(content_id, gofile_token)
 
-print("Done")
+    files = collect_files(data)
+
+    if not files:
+        raise Exception(
+            "No downloadable files found in GoFile response"
+        )
+
+    print(f"Found {len(files)} file(s)")
+
+    release = create_release()
+
+    upload_url = release["upload_url"]
+
+    for item in files:
+
+        name = item.get("name")
+        link = item.get("link")
+
+        if not link:
+            print(f"Skipping {name} (no download link)")
+            continue
+
+        print(f"Downloading: {name}")
+
+        download_file(link, name)
+
+        print(f"Uploading: {name}")
+
+        upload_asset(upload_url, name)
+
+        try:
+            os.remove(name)
+        except Exception:
+            pass
+
+    print("Done")
+
+
+if __name__ == "__main__":
+    main()
