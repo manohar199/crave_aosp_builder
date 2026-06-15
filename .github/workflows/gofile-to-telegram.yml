@@ -29,20 +29,32 @@ jobs:
 
       - name: Install dependencies
         run: |
-          pip install requests
-          pip install pyrogram tgcrypto
+          python -m pip install --upgrade pip
+          pip install requests pyrogram tgcrypto
 
       - name: Download from GoFile
         run: |
-          mkdir downloads
+          mkdir -p downloads
           export GF_DOWNLOAD_DIR=downloads
+
+          echo "Downloading from:"
+          echo "${{ github.event.inputs.gofile_url }}"
+
           python gofile-downloader.py "${{ github.event.inputs.gofile_url }}"
+
+      - name: Verify downloaded files
+        run: |
+          echo "========== DOWNLOADED FILES =========="
+          find downloads -type f || true
+
+          echo ""
+          echo "========== DIRECTORY TREE =========="
+          ls -R downloads || true
 
       - name: Upload files to Telegram
         run: |
           cat > send.py << 'EOF'
           import os
-          import asyncio
           from pyrogram import Client
 
           api_id = int(os.environ["TELEGRAM_API_ID"])
@@ -57,9 +69,9 @@ jobs:
               bot_token=bot_token
           )
 
-          async def main():
-              await app.start()
+          uploaded = 0
 
+          with app:
               for root, dirs, files in os.walk("downloads"):
                   for file in files:
                       path = os.path.join(root, file)
@@ -67,18 +79,25 @@ jobs:
                       try:
                           print(f"Uploading: {path}")
 
-                          await app.send_document(
+                          app.send_document(
                               chat_id=chat_id,
                               document=path,
                               caption=file
                           )
 
+                          uploaded += 1
+
                       except Exception as e:
                           print(f"Failed: {file} -> {e}")
 
-              await app.stop()
-
-          asyncio.run(main())
+          print(f"Uploaded {uploaded} file(s)")
           EOF
 
           python send.py
+
+      - name: Upload logs on failure
+        if: failure()
+        run: |
+          echo "Workflow failed."
+          echo "Downloaded files:"
+          find downloads -type f || true
