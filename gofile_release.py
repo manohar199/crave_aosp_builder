@@ -1,43 +1,59 @@
 import os
+import sys
 import asyncio
-from pyrogram import Client
+from telethon import TelegramClient
 
-API_ID = int(os.environ["TELEGRAM_API_ID"])
-API_HASH = os.environ["TELEGRAM_API_HASH"]
-CHAT_ID = os.environ["TELEGRAM_CHAT_ID"]
-
-DOWNLOAD_DIR = "downloads"
+API_ID = os.environ.get('TELEGRAM_API_ID')
+API_HASH = os.environ.get('TELEGRAM_API_HASH')
+BOT_TOKEN = os.environ.get('TELEGRAM_BOT_TOKEN')
+CHAT_ID = os.environ.get('TELEGRAM_CHAT_ID')
+TARGET_PATH = os.environ.get('TARGET_PATH')
 
 async def main():
-    app = Client(
-        "github_uploader",
-        api_id=API_ID,
-        api_hash=API_HASH,
-        in_memory=True
-    )
+    # Verify all secrets are present
+    if not all([API_ID, API_HASH, BOT_TOKEN, CHAT_ID, TARGET_PATH]):
+        print("Error: Missing required environment variables.")
+        sys.exit(1)
+        
+    # Initialize the client using API ID and Hash
+    client = TelegramClient('bot_session', int(API_ID), API_HASH)
+    await client.start(bot_token=BOT_TOKEN)
+    
+    try:
+        # Format chat ID safely
+        chat_id = int(CHAT_ID) if CHAT_ID.lstrip('-').isdigit() else CHAT_ID
+        
+        # Determine files to upload
+        files_to_upload = []
+        if os.path.isfile(TARGET_PATH):
+            files_to_upload.append(TARGET_PATH)
+        elif os.path.isdir(TARGET_PATH):
+            for root, _, files in os.walk(TARGET_PATH):
+                for f in files:
+                    files_to_upload.append(os.path.join(root, f))
+        else:
+            print(f"Path {TARGET_PATH} does not exist.")
+            sys.exit(1)
 
-    await app.start()
+        if not files_to_upload:
+            print("No files found to upload.")
+            sys.exit(0)
 
-    for root, dirs, files in os.walk(DOWNLOAD_DIR):
-        for file in files:
-            path = os.path.join(root, file)
+        # Upload sequence
+        for file_path in files_to_upload:
+            print(f"Uploading {file_path} to chat {chat_id}...")
+            await client.send_file(
+                chat_id, 
+                file_path, 
+                caption=f"Uploaded via GitHub Actions: {os.path.basename(file_path)}"
+            )
+            print(f"Success: {file_path}")
 
-            try:
-                size = os.path.getsize(path)
+    except Exception as e:
+        print(f"Error during upload: {e}")
+        sys.exit(1)
+    finally:
+        await client.disconnect()
 
-                if size > 0:
-                    print(f"Uploading: {path}")
-
-                    await app.send_document(
-                        chat_id=CHAT_ID,
-                        document=path,
-                        caption=file
-                    )
-
-            except Exception as e:
-                print(f"Failed upload: {path}")
-                print(e)
-
-    await app.stop()
-
-asyncio.run(main())
+if __name__ == '__main__':
+    asyncio.run(main())
