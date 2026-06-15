@@ -1,10 +1,10 @@
-name: Upload GoFile to Telegram
+name: Upload Direct URL to Telegram
 
 on:
   workflow_dispatch:
     inputs:
-      gofile_url:
-        description: 'GoFile Link (e.g., https://gofile.io/d/XhU1Pv)'
+      file_url:
+        description: 'Direct Download URL (e.g., https://storeX.gofile.io/...)'
         required: true
 
 jobs:
@@ -12,7 +12,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Set up Python
-        uses: actions/setup-python@v4
+        uses: actions/setup-python@v5 # Updated to v5 to fix Node.js warnings
         with:
           python-version: '3.10'
 
@@ -26,110 +26,57 @@ jobs:
           cat << 'EOF' > upload.py
           import os
           import requests
+          import urllib.parse
           import re
-          import sys
           from pyrogram import Client
 
-          # Fetch variables from the environment
-          GOFILE_URL = os.environ.get("GOFILE_URL")
+          URL = os.environ.get("FILE_URL")
           BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
           CHAT_ID = int(os.environ.get("TELEGRAM_CHAT_ID"))
           API_ID = int(os.environ.get("TELEGRAM_API_ID"))
           API_HASH = os.environ.get("TELEGRAM_API_HASH")
 
-          print(f"Resolving GoFile URL: {GOFILE_URL}")
+          print(f"Starting download from: {URL}")
           
-          # 1. Extract GoFile Folder ID
-          folder_id = GOFILE_URL.strip("/").split("/")[-1]
-          
-          # 2. Interact with GoFile API to get the direct download link
-          session = requests.Session()
-          session.headers.update({"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"})
-          
-          print("Requesting guest token from GoFile API...")
-          try:
-              token_req = session.post("https://api.gofile.io/accounts")
-              token_req.raise_for_status()
-              token = token_req.json()["data"]["token"]
-          except Exception as e:
-              print(f"Failed to generate GoFile guest token: {e}")
-              sys.exit(1)
-              
-          print(f"Fetching contents for folder ID: {folder_id}...")
-          try:
-              headers = {"Authorization": f"Bearer {token}"}
-              content_req = session.get(f"https://api.gofile.io/contents/{folder_id}", headers=headers)
-              content_data = content_req.json()
-              
-              # If GoFile's anti-bot system blocks it, attempt to scrape their dynamic website token (wt)
-              if content_data.get("status") != "ok":
-                  print("Standard request blocked. Attempting to fetch dynamic website token (wt)...")
-                  js_req = session.get("https://gofile.io/dist/js/alljs.js")
-                  wt_match = re.search(r'wt:\s*["\']([^"\']+)["\']', js_req.text)
-                  if wt_match:
-                      wt = wt_match.group(1)
-                      content_req = session.get(f"https://api.gofile.io/contents/{folder_id}?wt={wt}", headers=headers)
-                      content_data = content_req.json()
-                      
-              if content_data.get("status") != "ok":
-                  print(f"GoFile API Error: {content_data}")
-                  sys.exit(1)
-                  
-          except Exception as e:
-              print(f"Failed to fetch GoFile contents: {e}")
-              sys.exit(1)
-              
-          # Parse the API response to find the first file inside the folder
-          children = content_data.get("data", {}).get("children", {})
-          direct_url = None
           local_filename = "downloaded_file"
           
-          for child_id, child_info in children.items():
-              if child_info.get("type") == "file":
-                  direct_url = child_info.get("link")
-                  local_filename = child_info.get("name")
-                  break
-                  
-          if not direct_url:
-              print("Error: No files found in the specified GoFile folder.")
-              sys.exit(1)
-              
-          print(f"Successfully extracted file: {local_filename}")
+          # Headers to bypass basic hotlink protections
+          headers = {
+              "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
+              "Referer": "https://gofile.io/"
+          }
           
-          # 3. Download the actual file in chunks
-          print(f"Starting download from: {direct_url}")
-          with session.get(direct_url, stream=True) as r:
+          with requests.get(URL, headers=headers, stream=True) as r:
               r.raise_for_status()
+              if "content-disposition" in r.headers:
+                  d = r.headers['content-disposition']
+                  fname = re.findall("filename=(.+)", d)
+                  if len(fname) > 0:
+                      local_filename = fname[0].strip('"').strip("'")
+              else:
+                  parsed_url = urllib.parse.urlparse(URL)
+                  url_filename = os.path.basename(parsed_url.path)
+                  if url_filename:
+                      local_filename = urllib.parse.unquote(url_filename)
+
               with open(local_filename, 'wb') as f:
                   for chunk in r.iter_content(chunk_size=8192):
                       f.write(chunk)
                       
-          file_size_mb = os.path.getsize(local_filename) / (1024 * 1024)
-          print(f"Download complete: {local_filename} ({file_size_mb:.2f} MB)")
+          print(f"Download complete: {local_filename}")
 
-          # 4. Upload to Telegram via Pyrogram (MTProto)
-          print("Connecting to Telegram MTProto API...")
-          app = Client(
-              "telegram_bot",
-              api_id=API_ID,
-              api_hash=API_HASH,
-              bot_token=BOT_TOKEN
-          )
+          app = Client("telegram_bot", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN)
 
           with app:
-              print(f"Uploading {local_filename} to chat {CHAT_ID}...")
-              app.send_document(
-                  chat_id=CHAT_ID,
-                  document=local_filename,
-                  caption=f"Uploaded via GitHub Actions\nGoFile Source: {GOFILE_URL}"
-              )
+              print(f"Uploading to Telegram...")
+              app.send_document(chat_id=CHAT_ID, document=local_filename)
               
           print("Upload successful!")
           EOF
 
       - name: Execute Python Script
         env:
-          GOFILE_URL: ${{ github.event.inputs.gofile_url }}
+          FILE_URL: ${{ github.event.inputs.file_url }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
           TELEGRAM_API_ID: ${{ secrets.TELEGRAM_API_ID }}
