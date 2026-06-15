@@ -4,56 +4,70 @@ import json
 import requests
 from datetime import datetime
 
-GOFILE_URL = os.getenv("GOFILE_URL")
-GITHUB_TOKEN = os.getenv("GITHUB_TOKEN")
-GITHUB_REPOSITORY = os.getenv("GITHUB_REPOSITORY")
+GOFILE_URL = os.environ["GOFILE_URL"]
+GITHUB_TOKEN = os.environ["GITHUB_TOKEN"]
+GITHUB_REPOSITORY = os.environ["GITHUB_REPOSITORY"]
 
 
 def get_content_id(url):
-    match = re.search(r"/d/([A-Za-zA-Z0-9]+)", url)
+    match = re.search(r"/d/([A-Za-z0-9]+)", url)
     if not match:
         raise Exception(f"Invalid GoFile URL: {url}")
     return match.group(1)
 
 
 def get_gofile_token():
-    r = requests.post("https://api.gofile.io/accounts")
+    r = requests.post(
+        "https://api.gofile.io/accounts",
+        timeout=30
+    )
     r.raise_for_status()
 
     data = r.json()
 
-    if "data" not in data:
-        raise Exception(f"Unable to get GoFile token\n{data}")
+    if "data" not in data or "token" not in data["data"]:
+        raise Exception(
+            f"Unable to get GoFile token:\n{json.dumps(data, indent=2)}"
+        )
 
     return data["data"]["token"]
 
 
-def get_gofile_content(content_id, token):
+def get_content(content_id, token):
     headers = {
         "Authorization": f"Bearer {token}"
     }
 
-    url = (
+    urls = [
+        f"https://api.gofile.io/contents/{content_id}?contentFilter=all&page=1",
         f"https://api.gofile.io/contents/{content_id}"
-        "?contentFilter=all"
-        "&page=1"
+    ]
+
+    last_response = None
+
+    for url in urls:
+        try:
+            r = requests.get(
+                url,
+                headers=headers,
+                timeout=60
+            )
+            r.raise_for_status()
+
+            response = r.json()
+            last_response = response
+
+            print(json.dumps(response, indent=2))
+
+            if "data" in response:
+                return response["data"]
+
+        except Exception as e:
+            print(e)
+
+    raise Exception(
+        f"Failed to get content:\n{json.dumps(last_response, indent=2) if last_response else 'No response'}"
     )
-
-    r = requests.get(url, headers=headers)
-    r.raise_for_status()
-
-    response = r.json()
-
-    print("===== GOFILE RESPONSE =====")
-    print(json.dumps(response, indent=2))
-    print("===========================")
-
-    if "data" not in response:
-        raise Exception(
-            f"Unexpected GoFile response:\n{json.dumps(response, indent=2)}"
-        )
-
-    return response["data"]
 
 
 def collect_files(node):
@@ -71,6 +85,9 @@ def collect_files(node):
     if isinstance(children, dict):
         for child in children.values():
             files.extend(collect_files(child))
+
+    if node.get("link"):
+        files.append(node)
 
     return files
 
@@ -95,21 +112,17 @@ def create_release():
     r = requests.post(
         f"https://api.github.com/repos/{GITHUB_REPOSITORY}/releases",
         headers=headers,
-        json=payload
+        json=payload,
+        timeout=60
     )
 
     r.raise_for_status()
 
-    release = r.json()
-
-    print("Release Created:")
-    print(release["html_url"])
-
-    return release
+    return r.json()
 
 
 def download_file(url, filename):
-    with requests.get(url, stream=True) as r:
+    with requests.get(url, stream=True, timeout=600) as r:
         r.raise_for_status()
 
         with open(filename, "wb") as f:
@@ -118,7 +131,7 @@ def download_file(url, filename):
                     f.write(chunk)
 
 
-def upload_asset(upload_url, filepath):
+def upload_asset(upload_url, file_path):
     upload_url = upload_url.split("{")[0]
 
     headers = {
@@ -126,64 +139,66 @@ def upload_asset(upload_url, filepath):
         "Content-Type": "application/octet-stream"
     }
 
-    with open(filepath, "rb") as f:
+    with open(file_path, "rb") as f:
         r = requests.post(
-            f"{upload_url}?name={os.path.basename(filepath)}",
+            f"{upload_url}?name={os.path.basename(file_path)}",
             headers=headers,
-            data=f
+            data=f,
+            timeout=3600
         )
 
     r.raise_for_status()
 
-    print(
-        f"Uploaded: {os.path.basename(filepath)}"
-    )
+    print(f"Uploaded: {os.path.basename(file_path)}")
 
 
 def main():
-    if not GOFILE_URL:
-        raise Exception("GOFILE_URL missing")
-
     content_id = get_content_id(GOFILE_URL)
 
     print(f"Content ID: {content_id}")
 
     token = get_gofile_token()
 
-    data = get_gofile_content(
-        content_id,
-        token
-    )
+    data = get_content(content_id, token)
 
     files = collect_files(data)
 
+    unique = []
+    seen = set()
+
+    for item in files:
+        link = item.get("link")
+
+        if link and link not in seen:
+            seen.add(link)
+            unique.append(item)
+
+    files = unique
+
     if not files:
-        print("No files detected.")
-        print(json.dumps(data, indent=2))
         raise Exception(
-            "GoFile returned no downloadable files."
+            "No downloadable files found.\n"
+            + json.dumps(data, indent=2)
         )
 
-    print(f"Found {len(files)} files")
+    print(f"Found {len(files)} file(s)")
 
     release = create_release()
 
     upload_url = release["upload_url"]
 
-    for file_info in files:
-
-        name = file_info.get("name")
-        link = file_info.get("link")
+    for item in files:
+        name = item.get("name", "file.bin")
+        link = item.get("link")
 
         if not link:
-            print(f"Skipping {name}")
             continue
 
-        print(f"Downloading {name}")
+        print(f"Downloading: {name}")
 
         download_file(link, name)
 
-        print(f"Uploading {name}")
+        print(f"Uploading: {name}")
 
         upload_asset(upload_url, name)
 
@@ -193,6 +208,7 @@ def main():
             pass
 
     print("Completed Successfully")
+    print(release["html_url"])
 
 
 if __name__ == "__main__":
