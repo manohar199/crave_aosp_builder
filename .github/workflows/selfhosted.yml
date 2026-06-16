@@ -538,6 +538,7 @@ jobs:
 
         # Build the ROM
         sed -i '/^UM_6_1_FAMILY/ s/$/ blair/' hardware/qcom-caf/common/qcom_defs.mk && \
+        sed -i '/QCOM_BOARD_PLATFORMS += pineapple/a\QCOM_BOARD_PLATFORMS += blair' hardware/qcom-caf/common/qcom_boards.mk && \
         source build/envsetup.sh && \
         $LUNCH && \
         make installclean && \
