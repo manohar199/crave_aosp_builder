@@ -9,7 +9,7 @@ on:
         description: 'Release tag to send'
         required: true
         type: choice
-        default: 'latest'
+        default: '27287401044'
         options:
           - 'latest'
           # Add each new tag here as you cut releases, newest on top
