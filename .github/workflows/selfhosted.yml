@@ -544,17 +544,7 @@ jobs:
         $LUNCH && \
         make installclean && \
         ${{ github.event.inputs.BUILD_COMMAND }}"
-        ZIP=$(find out/target/product/spring -maxdepth 1 -type f -name "*.zip" | head -n 1)
-
-        if [ -n "$ZIP" ]; then
-        echo "Uploading $ZIP..."
-        wget https://raw.githubusercontent.com/lordgaruda/GoFile-Upload/refs/heads/master/upload.sh
-        chmod +x upload.sh
-        ./upload.sh "$ZIP"
-        else
-        echo "No ROM ZIP found!"
-        exit 1
-        fi
+       
       timeout-minutes: 1440
 
       # Send Build 'status' notification (Success)
