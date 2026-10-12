@@ -16,7 +16,7 @@ on:
         default: 'LineageOS 22.1'
         type: choice
         options:
-          - 'LineageOS 20.0'
+          - 'LineageOS 23.2'
           - 'LineageOS 21.0'
           - 'LineageOS 22.1'
           - 'ArrowOS 13.1'
